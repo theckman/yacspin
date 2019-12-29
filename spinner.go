@@ -327,6 +327,7 @@ func (s *Spinner) Stop() error {
 	// wait for the painter to stop
 	<-s.sigCh
 
+	s.index = 0
 	s.cancelCh = nil
 	s.sigCh = nil
 
