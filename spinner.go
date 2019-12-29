@@ -162,7 +162,7 @@ type Config struct {
 	StopMessage string
 
 	// StopCharacter is spinner character used when Stop() is called.
-	// Recommended character is `✓`.
+	// Recommended character is ✓.
 	StopCharacter string
 
 	// StopColors are the colors used for the Stop() printed line. This respects
@@ -173,7 +173,7 @@ type Config struct {
 	StopFailMessage string
 
 	// StopFailCharacter is the spinner character used when StopFail() is called.
-	// Recommended character is `✗`.
+	// Recommended character is ✗.
 	StopFailCharacter string
 
 	// StopFailColors are the colors used for the StopFail() printed line. This
@@ -557,7 +557,7 @@ func (s *Spinner) StopColors(colors ...string) error {
 }
 
 // StopCharacter sets the single "character" to use for the spinner. Recommended
-// character is `✓`.
+// character is ✓.
 func (s *Spinner) StopCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
@@ -584,7 +584,7 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 }
 
 // StopFailCharacter sets the single "character" to use for the spinner. Recommended
-// character is `✗`.
+// character is ✗.
 func (s *Spinner) StopFailCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
