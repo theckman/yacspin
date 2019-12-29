@@ -2,13 +2,12 @@
 // This file was copied from: https://github.com/briandowns/spinner
 //
 // Please see the LICENSE file for the copy of the Apache 2.0 License.
+//
+// Modifications:
+//
+// - removed runtime generation of CharSets 37 and 38; made them literals
 
 package yacspin
-
-const (
-	clockOneOClock = '\U0001F550'
-	clockOneThirty = '\U0001F55C'
-)
 
 // CharSets contains the default character sets from
 // https://github.com/briandowns/spinner.
@@ -50,6 +49,8 @@ var CharSets = map[int][]string{
 	34: {"(*---------)", "(-*--------)", "(--*-------)", "(---*------)", "(----*-----)", "(-----*----)", "(------*---)", "(-------*--)", "(--------*-)", "(---------*)"},
 	35: {"█▒▒▒▒▒▒▒▒▒", "███▒▒▒▒▒▒▒", "█████▒▒▒▒▒", "███████▒▒▒", "██████████"},
 	36: {"[                    ]", "[=>                  ]", "[===>                ]", "[=====>              ]", "[======>             ]", "[========>           ]", "[==========>         ]", "[============>       ]", "[==============>     ]", "[================>   ]", "[==================> ]", "[===================>]"},
+	37: {"🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚", "🕛"},                                                             // clock emoji: one per hour for hours 1~12
+	38: {"🕐", "🕜", "🕑", "🕝", "🕒", "🕞", "🕓", "🕟", "🕔", "🕠", "🕕", "🕡", "🕖", "🕢", "🕗", "🕣", "🕘", "🕤", "🕙", "🕥", "🕚", "🕦", "🕛", "🕧"}, // clock emoji: one per half hour for hours 1~12
 	39: {"🌍", "🌎", "🌏"},
 	40: {"◜", "◝", "◞", "◟"},
 	41: {"⬒", "⬔", "⬓", "⬕"},
@@ -89,11 +90,4 @@ var CharSets = map[int][]string{
 	75: {"⦾", "⦿"},
 	76: {"ဝ", "၀"},
 	77: {"▌", "▀", "▐▄"},
-}
-
-func init() {
-	for i := rune(0); i < 12; i++ {
-		CharSets[37] = append(CharSets[37], string([]rune{clockOneOClock + i}))
-		CharSets[38] = append(CharSets[38], string([]rune{clockOneOClock + i}), string([]rune{clockOneThirty + i}))
-	}
 }
