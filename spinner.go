@@ -364,7 +364,6 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 			s.mu.Lock()
 
 			c := s.chars[s.index]
-			// mw := s.maxWidth
 			s.index++
 
 			if s.index == len(s.chars) {
@@ -446,14 +445,20 @@ func (s *Spinner) Delay(d time.Duration) error {
 }
 
 // Prefix updates the Prefix before the spinner character.
-func (s *Spinner) Prefix(prefix string) { s.prefix.Store(prefix) }
+func (s *Spinner) Prefix(prefix string) {
+	s.prefix.Store(prefix)
+}
 
 // Suffix updates the Suffix after the spinner character. It's recommended that
 // this start with an empty space.
-func (s *Spinner) Suffix(suffix string) { s.suffix.Store(suffix) }
+func (s *Spinner) Suffix(suffix string) {
+	s.suffix.Store(suffix)
+}
 
 // Message updates the Message displayed after he suffix.
-func (s *Spinner) Message(message string) { s.message.Store(message) }
+func (s *Spinner) Message(message string) {
+	s.message.Store(message)
+}
 
 // Colors updates the github.com/fatih/colors for printing the spinner line.
 // ColorAll config parameter controls whether only the spinner character is
@@ -525,6 +530,5 @@ func (s *Spinner) Reverse() {
 	}
 }
 
-func int64Ptr(i int64) *int64 { return &i }
-
+func int64Ptr(i int64) *int64    { return &i }
 func uint32Ptr(u uint32) *uint32 { return &u }
