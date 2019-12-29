@@ -196,7 +196,7 @@ type Spinner struct {
 	index    int
 
 	active   *uint32
-	cancelCh chan struct{}
+	cancelCh chan struct{} // send: Stop(), close: StopFail(); both stop painter
 	sigCh    chan struct{}
 
 	delayDuration *int64 // to allow atomic updates
@@ -326,7 +326,7 @@ func (s *Spinner) Start() error {
 
 	// we now have atomic guarantees of no other threads starting or running
 
-	cancel, sig := make(chan struct{}), make(chan struct{})
+	cancel, sig := make(chan struct{}, 1), make(chan struct{})
 	s.cancelCh = cancel
 	s.sigCh = sig
 
