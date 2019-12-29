@@ -373,10 +373,10 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 
 			s.mu.Unlock()
 
-			_ = s.erase()
-
 			m, d := atomicString(s.message), atomicDuration(s.delayDuration)
 			cFn := atomicColorFn(s.colorFn)
+
+			_ = s.erase()
 
 			if err := s.paint(c, m, cFn); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
