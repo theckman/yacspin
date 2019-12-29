@@ -137,7 +137,7 @@ type Config struct {
 	// character(s). This cannot be changed.
 	ColorAll bool
 
-	// Colors are the colors sued for the different printed messages. This
+	// Colors are the colors used for the different printed messages. This
 	// respects the ColorAll field.
 	Colors []string
 
@@ -584,7 +584,7 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 }
 
 // StopFailCharacter sets the single "character" to use for the spinner. Recommended
-// character is `✓`.
+// character is `✗`.
 func (s *Spinner) StopFailCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
