@@ -393,6 +393,10 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 		case _, ok := <-cancel:
 			defer close(sig)
 
+			if err := s.erase(); err != nil {
+				panic(fmt.Sprintf("failed to erase line: %v", err))
+			}
+
 			var m string
 			var c character
 			var cFn func(format string, a ...interface{}) string
@@ -407,13 +411,14 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 				m = atomicString(s.stopFailMsg)
 			}
 
-			_ = s.erase()
-
 			if c.size == 0 && len(m) == 0 {
 				return
 			}
 
-			_ = s.paint(c, m+"\n", cFn)
+			// paint the line with a newline as it's the final line
+			if err := s.paint(c, m+"\n", cFn); err != nil {
+				panic(fmt.Sprintf("failed to paint stop line: %v", err))
+			}
 
 			return
 
@@ -432,7 +437,9 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 			m, d := atomicString(s.message), atomicDuration(s.delayDuration)
 			cFn := atomicColorFn(s.colorFn)
 
-			_ = s.erase()
+			if err := s.erase(); err != nil {
+				panic(fmt.Sprintf("failed to erase line: %v", err))
+			}
 
 			if err := s.paint(c, m, cFn); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
