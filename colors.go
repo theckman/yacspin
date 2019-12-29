@@ -11,6 +11,8 @@
 package yacspin
 
 import (
+	"fmt"
+
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
 )
@@ -155,6 +157,10 @@ func validColor(c string) bool {
 }
 
 func colorFunc(colors ...string) (func(format string, a ...interface{}) string, error) {
+	if len(colors) == 0 {
+		return fmt.Sprintf, nil
+	}
+
 	attrib := make([]color.Attribute, len(colors))
 
 	for i, color := range colors {

@@ -218,14 +218,7 @@ func New(cfg Config) (*Spinner, error) {
 		stopMsg:     &atomic.Value{},
 		stopChar:    &atomic.Value{},
 		stopColorFn: &atomic.Value{},
-	}
 
-	if len(cfg.Colors) == 0 {
-		cfg.Colors = []string{"fgWhite"}
-	}
-
-	if len(cfg.StopColors) == 0 {
-		cfg.StopColors = cfg.Colors
 	}
 
 	colorFn, err := colorFunc(cfg.Colors...)
