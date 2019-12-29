@@ -93,6 +93,20 @@ func atomicCharacter(v *atomic.Value) character {
 	return c
 }
 
+func atomicBool(v *atomic.Value) bool {
+	av := v.Load()
+	if av == nil {
+		return false
+	}
+
+	b, ok := av.(bool)
+	if !ok {
+		return false
+	}
+
+	return b
+}
+
 type character struct {
 	value string
 	size  int
@@ -132,6 +146,11 @@ type Config struct {
 	// Writer is the place where we are outputting the spinner, and can't be
 	// changed on the fly. If omitted, this defaults to os.Stdout.
 	Writer io.Writer
+
+	// HideCursor describes whether the cursor should be hidden by the spinner.
+	// If it is hidden, it will be restored when the spinner stops. This can't
+	// be changed on the fly.
+	HideCursor bool
 
 	// ColorAll describes whether to color everything (all) or just the spinner
 	// character(s). This cannot be changed.
@@ -187,8 +206,9 @@ type Config struct {
 //
 // Note: You need to use New() to construct a *Spinner.
 type Spinner struct {
-	writer   io.Writer
-	colorAll bool
+	writer       io.Writer
+	colorAll     bool
+	cursorHidden bool
 
 	mu       *sync.RWMutex
 	chars    []character
@@ -225,7 +245,9 @@ func New(cfg Config) (*Spinner, error) {
 		mu:            &sync.RWMutex{},
 		delayDuration: int64Ptr(int64(cfg.Delay)),
 		active:        uint32Ptr(0),
-		colorAll:      cfg.ColorAll,
+
+		colorAll:     cfg.ColorAll,
+		cursorHidden: cfg.HideCursor,
 
 		colorFn: &atomic.Value{},
 		prefix:  &atomic.Value{},
@@ -397,6 +419,12 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 				panic(fmt.Sprintf("failed to erase line: %v", err))
 			}
 
+			if s.cursorHidden {
+				if err := s.unhideCursor(); err != nil {
+					panic(fmt.Sprintf("failed to unhide cursor: %v", err))
+				}
+			}
+
 			var m string
 			var c character
 			var cFn func(format string, a ...interface{}) string
@@ -438,6 +466,12 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 				panic(fmt.Sprintf("failed to erase line: %v", err))
 			}
 
+			if s.cursorHidden {
+				if err := s.hideCursor(); err != nil {
+					panic(fmt.Sprintf("failed to hide cursor: %v", err))
+				}
+			}
+
 			if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
@@ -451,6 +485,16 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 // erase clears the line
 func (s *Spinner) erase() error {
 	_, err := fmt.Fprint(s.writer, "\r\033[K\r")
+	return err
+}
+
+func (s *Spinner) hideCursor() error {
+	_, err := fmt.Fprint(s.writer, "\r\033[?25l\r")
+	return err
+}
+
+func (s *Spinner) unhideCursor() error {
+	_, err := fmt.Fprint(s.writer, "\r\033[?25h\r")
 	return err
 }
 
