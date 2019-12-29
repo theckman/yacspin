@@ -434,18 +434,15 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 
 			s.mu.Unlock()
 
-			m, d := atomicString(s.message), atomicDuration(s.delayDuration)
-			cFn := atomicColorFn(s.colorFn)
-
 			if err := s.erase(); err != nil {
 				panic(fmt.Sprintf("failed to erase line: %v", err))
 			}
 
-			if err := s.paint(c, m, cFn); err != nil {
+			if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 
-			time.Sleep(d)
+			time.Sleep(atomicDuration(s.delayDuration))
 		}
 
 	}
