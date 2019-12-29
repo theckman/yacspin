@@ -168,6 +168,17 @@ type Config struct {
 	// StopColors are the colors used for the Stop() printed line. This respects
 	// the ColorAll field.
 	StopColors []string
+
+	// StopFailMessage is the message used when StopFail() is called.
+	StopFailMessage string
+
+	// StopFailCharacter is the spinner character used when StopFail() is called.
+	// Recommended character is `✗`.
+	StopFailCharacter string
+
+	// StopFailColors are the colors used for the StopFail() printed line. This
+	// respects the ColorAll field.
+	StopFailColors []string
 }
 
 // Spinner is the struct type representing a spinner. It's configured via the
@@ -190,13 +201,18 @@ type Spinner struct {
 
 	delayDuration *int64 // to allow atomic updates
 
-	colorFn     *atomic.Value
-	prefix      *atomic.Value
-	suffix      *atomic.Value
-	message     *atomic.Value
+	colorFn *atomic.Value
+	prefix  *atomic.Value
+	suffix  *atomic.Value
+	message *atomic.Value
+
 	stopMsg     *atomic.Value
 	stopChar    *atomic.Value
 	stopColorFn *atomic.Value
+
+	stopFailMsg     *atomic.Value
+	stopFailChar    *atomic.Value
+	stopFailColorFn *atomic.Value
 }
 
 // New creates a new unstarted spinner.
@@ -211,14 +227,18 @@ func New(cfg Config) (*Spinner, error) {
 		active:        uint32Ptr(0),
 		colorAll:      cfg.ColorAll,
 
-		colorFn:     &atomic.Value{},
-		prefix:      &atomic.Value{},
-		suffix:      &atomic.Value{},
-		message:     &atomic.Value{},
+		colorFn: &atomic.Value{},
+		prefix:  &atomic.Value{},
+		suffix:  &atomic.Value{},
+		message: &atomic.Value{},
+
 		stopMsg:     &atomic.Value{},
 		stopChar:    &atomic.Value{},
 		stopColorFn: &atomic.Value{},
 
+		stopFailMsg:     &atomic.Value{},
+		stopFailChar:    &atomic.Value{},
+		stopFailColorFn: &atomic.Value{},
 	}
 
 	colorFn, err := colorFunc(cfg.Colors...)
@@ -230,10 +250,17 @@ func New(cfg Config) (*Spinner, error) {
 
 	stopColorFn, err := colorFunc(cfg.StopColors...)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to build color function")
+		return nil, errors.Wrapf(err, "failed to build successs color function")
 	}
 
 	s.stopColorFn.Store(stopColorFn)
+
+	stopFailColorFn, err := colorFunc(cfg.StopFailColors...)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to build fail color function")
+	}
+
+	s.stopFailColorFn.Store(stopFailColorFn)
 
 	if cfg.Writer == nil {
 		cfg.Writer = os.Stdout
@@ -267,6 +294,16 @@ func New(cfg Config) (*Spinner, error) {
 		n := runewidth.StringWidth(cfg.StopCharacter)
 
 		s.stopChar.Store(character{value: cfg.StopCharacter, size: n})
+	}
+
+	if len(cfg.StopFailMessage) > 0 {
+		s.stopFailMsg.Store(cfg.StopFailMessage)
+	}
+
+	if len(cfg.StopFailCharacter) > 0 {
+		n := runewidth.StringWidth(cfg.StopFailCharacter)
+
+		s.stopFailChar.Store(character{value: cfg.StopFailCharacter, size: n})
 	}
 
 	return s, nil
@@ -307,13 +344,30 @@ func (s *Spinner) Start() error {
 // using the StopColors. This blocks until the stopped message is printed. Only
 // possible error is if the spinner is not running.
 func (s *Spinner) Stop() error {
+	return s.stop(false)
+}
+
+// StopFail disables the spinner, and prints the StopFailCharacter with the
+// StopFailMessage using the StopFailColors. This blocks until the stopped
+// message is printed. Only possible error is if the spinner is not running.
+func (s *Spinner) StopFail() error {
+	return s.stop(true)
+}
+
+func (s *Spinner) stop(fail bool) error {
 	// move us to a stopping state to protect against concurrent Stop() calls
 	a := atomic.CompareAndSwapUint32(s.active, 2, 3)
 	if !a {
 		return errors.New("spinner not running or shutting down")
 	}
 
-	// we now have an atomic guarantees of no other threads
+	// we now have an atomic guarantees of no other threads invoking state changes
+
+	if !fail {
+		// this tells the painter to print the StopMessage and not the
+		// StopFailMessage
+		s.cancelCh <- struct{}{}
+	}
 
 	close(s.cancelCh)
 
@@ -337,22 +391,32 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 	for {
 		select {
 		case _, ok := <-cancel:
-			if !ok {
-				defer close(sig)
+			defer close(sig)
 
-				c, m := atomicCharacter(s.stopChar), atomicString(s.stopMsg)
-				cFn := atomicColorFn(s.stopColorFn)
+			var m string
+			var c character
+			var cFn func(format string, a ...interface{}) string
 
-				_ = s.erase()
+			if ok {
+				c = atomicCharacter(s.stopChar)
+				cFn = atomicColorFn(s.stopColorFn)
+				m = atomicString(s.stopMsg)
+			} else {
+				c = atomicCharacter(s.stopFailChar)
+				cFn = atomicColorFn(s.stopFailColorFn)
+				m = atomicString(s.stopFailMsg)
+			}
 
-				if c.size == 0 && len(m) == 0 {
-					return
-				}
+			_ = s.erase()
 
-				_ = s.paint(c, m+"\n", cFn)
-
+			if c.size == 0 && len(m) == 0 {
 				return
 			}
+
+			_ = s.paint(c, m+"\n", cFn)
+
+			return
+
 		default:
 			s.mu.Lock()
 
@@ -494,6 +558,33 @@ func (s *Spinner) StopCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
 	s.stopChar.Store(character{value: char, size: n})
+}
+
+// StopFailMessage updates the Message used when StopFail() is called.
+func (s *Spinner) StopFailMessage(message string) {
+	s.stopFailMsg.Store(message)
+
+}
+
+// StopFailColors updates the colors used for the StopFail message. See Colors() method
+// documentation for more context.
+func (s *Spinner) StopFailColors(colors ...string) error {
+	colorFn, err := colorFunc(colors...)
+	if err != nil {
+		return errors.Wrapf(err, "failed to build color function")
+	}
+
+	s.stopFailColorFn.Store(colorFn)
+
+	return nil
+}
+
+// StopFailCharacter sets the single "character" to use for the spinner. Recommended
+// character is `✓`.
+func (s *Spinner) StopFailCharacter(char string) {
+	n := runewidth.StringWidth(char)
+
+	s.stopFailChar.Store(character{value: char, size: n})
 }
 
 // CharSet updates the set of characters (strings) to use for the spinner. You
