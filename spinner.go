@@ -528,6 +528,8 @@ func (s *Spinner) Reverse() {
 		i++
 		j--
 	}
+
+	s.index = 0
 }
 
 func int64Ptr(i int64) *int64    { return &i }
