@@ -217,7 +217,8 @@ type Spinner struct {
 
 	active   *uint32
 	cancelCh chan struct{} // send: Stop(), close: StopFail(); both stop painter
-	sigCh    chan struct{}
+	duCh     chan struct{}
+	doneCh   chan struct{}
 
 	delayDuration *int64 // to allow atomic updates
 
@@ -245,6 +246,7 @@ func New(cfg Config) (*Spinner, error) {
 		mu:            &sync.RWMutex{},
 		delayDuration: int64Ptr(int64(cfg.Delay)),
 		active:        uint32Ptr(0),
+		duCh:          make(chan struct{}, 1),
 
 		colorAll:     cfg.ColorAll,
 		cursorHidden: cfg.HideCursor,
@@ -350,9 +352,9 @@ func (s *Spinner) Start() error {
 
 	cancel, sig := make(chan struct{}, 1), make(chan struct{})
 	s.cancelCh = cancel
-	s.sigCh = sig
+	s.doneCh = sig
 
-	go s.painter(cancel, sig)
+	go s.painter(cancel, s.duCh, sig)
 
 	// move us to the running state
 	if !atomic.CompareAndSwapUint32(s.active, 1, 2) {
@@ -394,11 +396,11 @@ func (s *Spinner) stop(fail bool) error {
 	close(s.cancelCh)
 
 	// wait for the painter to stop
-	<-s.sigCh
+	<-s.doneCh
 
 	s.index = 0
 	s.cancelCh = nil
-	s.sigCh = nil
+	s.doneCh = nil
 
 	// move us to the stopped state
 	a = atomic.CompareAndSwapUint32(s.active, 3, 0)
@@ -409,11 +411,73 @@ func (s *Spinner) stop(fail bool) error {
 	return nil
 }
 
-func (s *Spinner) painter(cancel, sig chan struct{}) {
+func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struct{}) {
+	timer := time.NewTimer(0)
+	var lastTick time.Time
+
 	for {
 		select {
+		case <-timer.C:
+			// this is used by the next case statement
+			lastTick = time.Now()
+
+			s.mu.Lock()
+
+			c := s.chars[s.index]
+			s.index++
+
+			if s.index == len(s.chars) {
+				s.index = 0
+			}
+
+			s.mu.Unlock()
+
+			if err := s.erase(); err != nil {
+				panic(fmt.Sprintf("failed to erase line: %v", err))
+			}
+
+			if s.cursorHidden {
+				if err := s.hideCursor(); err != nil {
+					panic(fmt.Sprintf("failed to hide cursor: %v", err))
+				}
+			}
+
+			if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
+				panic(fmt.Sprintf("failed to paint line: %v", err))
+			}
+
+			timer.Reset(atomicDuration(s.delayDuration))
+
+		case <-delayUpdate:
+			// the delay duration was changed
+			// let's see if we should fire the timer now
+			// or reduce its current duration to match the new duration
+
+			// if timer fired, drain the channel
+			if !timer.Stop() {
+			timerLoop:
+				for {
+					select {
+					case <-timer.C:
+					default:
+						break timerLoop
+					}
+				}
+			}
+
+			timeSince := time.Since(lastTick)
+			delay := atomicDuration(s.delayDuration)
+
+			// if we've exceeded the new delay trigger timer immediately
+			if timeSince >= delay {
+				timer.Reset(0)
+				break
+			}
+
+			timer.Reset(delay - timeSince)
+
 		case _, ok := <-cancel:
-			defer close(sig)
+			defer close(done)
 
 			if err := s.erase(); err != nil {
 				panic(fmt.Sprintf("failed to erase line: %v", err))
@@ -449,34 +513,6 @@ func (s *Spinner) painter(cancel, sig chan struct{}) {
 			}
 
 			return
-
-		default:
-			s.mu.Lock()
-
-			c := s.chars[s.index]
-			s.index++
-
-			if s.index == len(s.chars) {
-				s.index = 0
-			}
-
-			s.mu.Unlock()
-
-			if err := s.erase(); err != nil {
-				panic(fmt.Sprintf("failed to erase line: %v", err))
-			}
-
-			if s.cursorHidden {
-				if err := s.hideCursor(); err != nil {
-					panic(fmt.Sprintf("failed to hide cursor: %v", err))
-				}
-			}
-
-			if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
-				panic(fmt.Sprintf("failed to paint line: %v", err))
-			}
-
-			time.Sleep(atomicDuration(s.delayDuration))
 		}
 
 	}
@@ -545,6 +581,12 @@ func (s *Spinner) Delay(d time.Duration) error {
 	}
 
 	atomic.StoreInt64(s.delayDuration, int64(d))
+
+	// non-blocking notification
+	select {
+	case s.duCh <- struct{}{}:
+	default:
+	}
 
 	return nil
 }
