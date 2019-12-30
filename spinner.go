@@ -93,20 +93,6 @@ func atomicCharacter(v *atomic.Value) character {
 	return c
 }
 
-func atomicBool(v *atomic.Value) bool {
-	av := v.Load()
-	if av == nil {
-		return false
-	}
-
-	b, ok := av.(bool)
-	if !ok {
-		return false
-	}
-
-	return b
-}
-
 type character struct {
 	value string
 	size  int
