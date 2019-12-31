@@ -260,7 +260,7 @@ func New(cfg Config) (*Spinner, error) {
 
 	stopColorFn, err := colorFunc(cfg.StopColors...)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to build successs color function")
+		return nil, errors.Wrapf(err, "failed to build success color function")
 	}
 
 	s.stopColorFn.Store(stopColorFn)
