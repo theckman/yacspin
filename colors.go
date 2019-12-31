@@ -171,6 +171,5 @@ func colorFunc(colors ...string) (func(format string, a ...interface{}) string, 
 		attrib[i] = colorAttributeMap[color]
 	}
 
-	fn := color.New(attrib...).SprintfFunc()
-	return fn, nil
+	return color.New(attrib...).SprintfFunc(), nil
 }
