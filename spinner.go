@@ -397,6 +397,34 @@ func (s *Spinner) stop(fail bool) error {
 	return nil
 }
 
+// handleDelayUpdate is for when the delay duration was changed. This tries to
+// see if we should fire the timer now, or change its current duration to match
+// the new duration.
+func (s *Spinner) handleDelayUpdate(timer *time.Timer, lastTick time.Time) {
+	// if timer fired, drain the channel
+	if !timer.Stop() {
+	timerLoop:
+		for {
+			select {
+			case <-timer.C:
+			default:
+				break timerLoop
+			}
+		}
+	}
+
+	timeSince := time.Since(lastTick)
+	delay := atomicDuration(s.delayDuration)
+
+	// if we've exceeded the new delay trigger timer immediately
+	if timeSince >= delay {
+		timer.Reset(0)
+		return
+	}
+
+	timer.Reset(delay - timeSince)
+}
+
 func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struct{}) {
 	timer := time.NewTimer(0)
 	var lastTick time.Time
@@ -404,103 +432,87 @@ func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struc
 	for {
 		select {
 		case <-timer.C:
-			// this is used by the next case statement
 			lastTick = time.Now()
 
-			s.mu.Lock()
-
-			c := s.chars[s.index]
-			s.index++
-
-			if s.index == len(s.chars) {
-				s.index = 0
-			}
-
-			s.mu.Unlock()
-
-			if err := s.erase(); err != nil {
-				panic(fmt.Sprintf("failed to erase line: %v", err))
-			}
-
-			if s.cursorHidden {
-				if err := s.hideCursor(); err != nil {
-					panic(fmt.Sprintf("failed to hide cursor: %v", err))
-				}
-			}
-
-			if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
-				panic(fmt.Sprintf("failed to paint line: %v", err))
-			}
-
-			timer.Reset(atomicDuration(s.delayDuration))
+			s.paintUpdate(timer)
 
 		case <-delayUpdate:
-			// the delay duration was changed
-			// let's see if we should fire the timer now
-			// or reduce its current duration to match the new duration
-
-			// if timer fired, drain the channel
-			if !timer.Stop() {
-			timerLoop:
-				for {
-					select {
-					case <-timer.C:
-					default:
-						break timerLoop
-					}
-				}
-			}
-
-			timeSince := time.Since(lastTick)
-			delay := atomicDuration(s.delayDuration)
-
-			// if we've exceeded the new delay trigger timer immediately
-			if timeSince >= delay {
-				timer.Reset(0)
-				break
-			}
-
-			timer.Reset(delay - timeSince)
+			s.handleDelayUpdate(timer, lastTick)
 
 		case _, ok := <-cancel:
 			defer close(done)
 
-			if err := s.erase(); err != nil {
-				panic(fmt.Sprintf("failed to erase line: %v", err))
-			}
+			timer.Stop()
 
-			if s.cursorHidden {
-				if err := s.unhideCursor(); err != nil {
-					panic(fmt.Sprintf("failed to unhide cursor: %v", err))
-				}
-			}
-
-			var m string
-			var c character
-			var cFn func(format string, a ...interface{}) string
-
-			if ok {
-				c = atomicCharacter(s.stopChar)
-				cFn = atomicColorFn(s.stopColorFn)
-				m = atomicString(s.stopMsg)
-			} else {
-				c = atomicCharacter(s.stopFailChar)
-				cFn = atomicColorFn(s.stopFailColorFn)
-				m = atomicString(s.stopFailMsg)
-			}
-
-			if c.size == 0 && len(m) == 0 {
-				return
-			}
-
-			// paint the line with a newline as it's the final line
-			if err := s.paint(c, m+"\n", cFn); err != nil {
-				panic(fmt.Sprintf("failed to paint stop line: %v", err))
-			}
+			s.paintStop(ok)
 
 			return
 		}
 
+	}
+}
+
+func (s *Spinner) paintUpdate(timer *time.Timer) {
+	s.mu.Lock()
+
+	c := s.chars[s.index]
+	s.index++
+
+	if s.index == len(s.chars) {
+		s.index = 0
+	}
+
+	s.mu.Unlock()
+
+	if err := s.erase(); err != nil {
+		panic(fmt.Sprintf("failed to erase line: %v", err))
+	}
+
+	if s.cursorHidden {
+		if err := s.hideCursor(); err != nil {
+			panic(fmt.Sprintf("failed to hide cursor: %v", err))
+		}
+	}
+
+	if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
+		panic(fmt.Sprintf("failed to paint line: %v", err))
+	}
+
+	timer.Reset(atomicDuration(s.delayDuration))
+}
+
+func (s *Spinner) paintStop(chanOk bool) {
+	if err := s.erase(); err != nil {
+		panic(fmt.Sprintf("failed to erase line: %v", err))
+	}
+
+	if s.cursorHidden {
+		if err := s.unhideCursor(); err != nil {
+			panic(fmt.Sprintf("failed to unhide cursor: %v", err))
+		}
+	}
+
+	var m string
+	var c character
+	var cFn func(format string, a ...interface{}) string
+
+	if chanOk {
+		c = atomicCharacter(s.stopChar)
+		cFn = atomicColorFn(s.stopColorFn)
+		m = atomicString(s.stopMsg)
+	} else {
+		c = atomicCharacter(s.stopFailChar)
+		cFn = atomicColorFn(s.stopFailColorFn)
+		m = atomicString(s.stopFailMsg)
+	}
+
+	if c.size == 0 && len(m) == 0 {
+		return
+	}
+
+	// paint the line with a newline as it's the final line
+	if err := s.paint(c, m+"\n", cFn); err != nil {
+		panic(fmt.Sprintf("failed to paint stop line: %v", err))
 	}
 }
 
