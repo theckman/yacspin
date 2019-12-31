@@ -1,6 +1,11 @@
 # Yet Another CLi Spinner (for Go)
 [![License](https://img.shields.io/github/license/theckman/yacspin.svg)](https://github.com/theckman/yacspin/blob/master/LICENSE)
 [![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat)](https://godoc.org/github.com/theckman/yacspin)
+[![Latest Git Tag](https://img.shields.io/github/tag/theckman/yacspin.svg)](https://github.com/theckman/yacspin/releases)
+[![Travis master Build Status](https://img.shields.io/travis/theckman/yacspin/master.svg?label=TravisCI)](https://travis-ci.org/theckman/yacspin/branches)
+[![Go Report Card](https://goreportcard.com/badge/github.com/theckman/yacspin)](https://goreportcard.com/report/github.com/theckman/yacspin)
+[![Codecov](https://img.shields.io/codecov/c/github/theckman/yacspin)](https://codecov.io/gh/theckman/yacspin)
+[![Go Cover Test Coverage](https://gocover.io/_badge/github.com/theckman/yacspin?v0)](https://gocover.io/github.com/theckman/yacspin)
 
 Package `yacspin` provides yet another CLi spinner for Go, taking inspiration
 (and some utility code) from the https://github.com/briandowns/spinner project.
