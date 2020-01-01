@@ -2,40 +2,10 @@ package yacspin
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/fatih/color"
 )
-
-// testErrCheck looks to see if errContains is a substring of err.Error(). If
-// not, this calls t.Fatal(). It also calls t.Fatal() if there was an error, but
-// errContains is empty. Returns true if you should continue running the test,
-// or false if you should stop the test.
-func testErrCheck(t *testing.T, name string, errContains string, err error) bool {
-	t.Helper()
-
-	if len(errContains) > 0 {
-		if err == nil {
-			t.Fatalf("%s error = <nil>, should contain %q", name, errContains)
-			return false
-		}
-
-		if errStr := err.Error(); !strings.Contains(errStr, errContains) {
-			t.Fatalf("%s error = %q, should contain %q", name, errStr, errContains)
-			return false
-		}
-
-		return false
-	}
-
-	if err != nil && len(errContains) == 0 {
-		t.Fatalf("%s unexpected error: %v", name, err)
-		return false
-	}
-
-	return true
-}
 
 func Test_validColor(t *testing.T) {
 	validColors := []string{

@@ -94,8 +94,8 @@ func atomicCharacter(v *atomic.Value) character {
 }
 
 type character struct {
-	value string
-	size  int
+	Value string
+	Size  int
 }
 
 func setToCharSlice(ss []string) ([]character, int) {
@@ -113,8 +113,8 @@ func setToCharSlice(ss []string) ([]character, int) {
 		}
 
 		c[i] = character{
-			value: s,
-			size:  n,
+			Value: s,
+			Size:  n,
 		}
 	}
 
@@ -251,26 +251,17 @@ func New(cfg Config) (*Spinner, error) {
 		stopFailColorFn: &atomic.Value{},
 	}
 
-	colorFn, err := colorFunc(cfg.Colors...)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to build color function")
+	if err := s.Colors(cfg.Colors...); err != nil {
+		return nil, err
 	}
 
-	s.colorFn.Store(colorFn)
-
-	stopColorFn, err := colorFunc(cfg.StopColors...)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to build success color function")
+	if err := s.StopColors(cfg.StopColors...); err != nil {
+		return nil, err
 	}
 
-	s.stopColorFn.Store(stopColorFn)
-
-	stopFailColorFn, err := colorFunc(cfg.StopFailColors...)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to build fail color function")
+	if err := s.StopFailColors(cfg.StopFailColors...); err != nil {
+		return nil, err
 	}
-
-	s.stopFailColorFn.Store(stopFailColorFn)
 
 	if cfg.Writer == nil {
 		cfg.Writer = os.Stdout
@@ -285,35 +276,31 @@ func New(cfg Config) (*Spinner, error) {
 	s.chars, s.maxWidth = setToCharSlice(cfg.CharSet)
 
 	if len(cfg.Prefix) > 0 {
-		s.prefix.Store(cfg.Prefix)
+		s.Prefix(cfg.Prefix)
 	}
 
 	if len(cfg.Suffix) > 0 {
-		s.suffix.Store(cfg.Suffix)
+		s.Suffix(cfg.Suffix)
 	}
 
 	if len(cfg.Message) > 0 {
-		s.message.Store(cfg.Message)
+		s.Message(cfg.Message)
 	}
 
 	if len(cfg.StopMessage) > 0 {
-		s.stopMsg.Store(cfg.StopMessage)
+		s.StopMessage(cfg.StopMessage)
 	}
 
 	if len(cfg.StopCharacter) > 0 {
-		n := runewidth.StringWidth(cfg.StopCharacter)
-
-		s.stopChar.Store(character{value: cfg.StopCharacter, size: n})
+		s.StopCharacter(cfg.StopCharacter)
 	}
 
 	if len(cfg.StopFailMessage) > 0 {
-		s.stopFailMsg.Store(cfg.StopFailMessage)
+		s.StopFailMessage(cfg.StopFailMessage)
 	}
 
 	if len(cfg.StopFailCharacter) > 0 {
-		n := runewidth.StringWidth(cfg.StopFailCharacter)
-
-		s.stopFailChar.Store(character{value: cfg.StopFailCharacter, size: n})
+		s.StopFailCharacter(cfg.StopFailCharacter)
 	}
 
 	return s, nil
@@ -506,7 +493,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 		m = atomicString(s.stopFailMsg)
 	}
 
-	if c.size == 0 && len(m) == 0 {
+	if c.Size == 0 && len(m) == 0 {
 		return
 	}
 
@@ -535,14 +522,14 @@ func (s *Spinner) unhideCursor() error {
 // padChar pads the spinner character so suffix / message offset from left is
 // consistent
 func padChar(char character, maxWidth int) string {
-	padSize := maxWidth - char.size
-	return char.value + strings.Repeat(" ", padSize)
+	padSize := maxWidth - char.Size
+	return char.Value + strings.Repeat(" ", padSize)
 }
 
 // paint writes a single line to the s.writer, using the provided character,
 // message, and color function
 func (s *Spinner) paint(char character, message string, colorFn func(format string, a ...interface{}) string) error {
-	if char.size == 0 {
+	if char.Size == 0 {
 		if s.colorAll {
 			fmt.Fprint(s.writer, colorFn(message))
 		} else {
@@ -632,7 +619,7 @@ func (s *Spinner) StopMessage(message string) {
 func (s *Spinner) StopColors(colors ...string) error {
 	colorFn, err := colorFunc(colors...)
 	if err != nil {
-		return errors.Wrapf(err, "failed to build color function")
+		return errors.Wrapf(err, "failed to build stop color function")
 	}
 
 	s.stopColorFn.Store(colorFn)
@@ -645,7 +632,7 @@ func (s *Spinner) StopColors(colors ...string) error {
 func (s *Spinner) StopCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
-	s.stopChar.Store(character{value: char, size: n})
+	s.stopChar.Store(character{Value: char, Size: n})
 }
 
 // StopFailMessage updates the Message used when StopFail() is called.
@@ -659,7 +646,7 @@ func (s *Spinner) StopFailMessage(message string) {
 func (s *Spinner) StopFailColors(colors ...string) error {
 	colorFn, err := colorFunc(colors...)
 	if err != nil {
-		return errors.Wrapf(err, "failed to build color function")
+		return errors.Wrapf(err, "failed to build stop fail color function")
 	}
 
 	s.stopFailColorFn.Store(colorFn)
@@ -672,7 +659,7 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 func (s *Spinner) StopFailCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
-	s.stopFailChar.Store(character{value: char, size: n})
+	s.stopFailChar.Store(character{Value: char, Size: n})
 }
 
 // CharSet updates the set of characters (strings) to use for the spinner. You
