@@ -263,17 +263,19 @@ func New(cfg Config) (*Spinner, error) {
 		return nil, err
 	}
 
+	if len(cfg.CharSet) == 0 {
+		cfg.CharSet = CharSets[9]
+	}
+
+	if err := s.CharSet(cfg.CharSet); err != nil {
+		return nil, err
+	}
+
 	if cfg.Writer == nil {
 		cfg.Writer = os.Stdout
 	}
 
 	s.writer = cfg.Writer
-
-	if len(cfg.CharSet) == 0 {
-		cfg.CharSet = CharSets[9]
-	}
-
-	s.chars, s.maxWidth = setToCharSlice(cfg.CharSet)
 
 	if len(cfg.Prefix) > 0 {
 		s.Prefix(cfg.Prefix)
@@ -667,7 +669,11 @@ func (s *Spinner) StopFailCharacter(char string) {
 //
 // The character sets available in the CharSets variable are from the
 // https://github.com/briandowns/spinner project.
-func (s *Spinner) CharSet(cs []string) {
+func (s *Spinner) CharSet(cs []string) error {
+	if len(cs) == 0 {
+		return errors.New("failed to set character set:  must provide at least one string")
+	}
+
 	chars, mw := setToCharSlice(cs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -675,6 +681,8 @@ func (s *Spinner) CharSet(cs []string) {
 	s.chars = chars
 	s.maxWidth = mw
 	s.index = 0
+
+	return nil
 }
 
 // Reverse flips the character set order of the spinner characters.

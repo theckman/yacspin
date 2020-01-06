@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -319,5 +321,196 @@ func TestNew(t *testing.T) {
 				t.Errorf("spinner.maxWidth = %d, want %d", spinner.maxWidth, tt.maxWidth)
 			}
 		})
+	}
+}
+
+func TestSpinner_Active(t *testing.T) {
+	spinner := &Spinner{active: uint32Ptr(0)}
+
+	tests := []struct {
+		name  string
+		input uint32
+		want  bool
+	}{
+		{
+			name:  "0",
+			input: 0,
+			want:  false,
+		},
+		{
+			name:  "1",
+			input: 1,
+			want:  true,
+		},
+		{
+			name:  "2",
+			input: 2,
+			want:  true,
+		},
+		{
+			name:  "3",
+			input: 3,
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			atomic.StoreUint32(spinner.active, tt.input)
+
+			if got := spinner.Active(); got != tt.want {
+				t.Errorf("got = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSpinner_Delay(t *testing.T) {
+	tests := []struct {
+		name  string
+		input time.Duration
+		ch    chan struct{}
+		err   string
+	}{
+		{
+			name: "invalid",
+			ch:   make(chan struct{}),
+			err:  "delay must be greater than 0",
+		},
+		{
+			name:  "assert_non-blocking",
+			input: 42,
+			ch:    make(chan struct{}),
+		},
+		{
+			name:  "assert_notification",
+			input: 42,
+			ch:    make(chan struct{}, 1),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer close(tt.ch)
+
+			spinner := &Spinner{
+				delayDuration: int64Ptr(0),
+				duCh:          tt.ch,
+			}
+
+			tmr := time.NewTimer(2 * time.Second)
+			fnch := make(chan struct{})
+
+			var err error
+
+			go func() {
+				defer close(fnch)
+				err = spinner.Delay(tt.input)
+			}()
+
+			select {
+			case <-tmr.C:
+				t.Fatal("function blocked")
+			case <-fnch:
+				tmr.Stop()
+			}
+
+			if cont := testErrCheck(t, "spinner.Delay()", tt.err, err); !cont {
+				return
+			}
+
+			if cap(tt.ch) == 1 {
+				select {
+				case <-tt.ch:
+					// success
+				default:
+					t.Fatal("notification channel had no messages")
+				}
+			}
+
+			got := time.Duration(atomic.LoadInt64(spinner.delayDuration))
+			if got != tt.input {
+				t.Errorf("got = %s, want %s", got, tt.input)
+			}
+		})
+	}
+}
+
+func TestSpinner_CharSet(t *testing.T) {
+	tests := []struct {
+		name     string
+		charSet  []string
+		maxWidth int
+		err      string
+	}{
+		{
+			name: "no_charset",
+			err:  "failed to set character set:  must provide at least one string",
+		},
+		{
+			name:     "charset",
+			charSet:  CharSets[59],
+			maxWidth: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spinner := &Spinner{mu: &sync.RWMutex{}}
+
+			err := spinner.CharSet(tt.charSet)
+
+			if cont := testErrCheck(t, "spinner.CharSet()", tt.err, err); !cont {
+				return
+			}
+
+			charSet := make([]character, len(tt.charSet))
+
+			for i, char := range tt.charSet {
+				charSet[i] = character{
+					Value: char,
+					Size:  runewidth.StringWidth(char),
+				}
+			}
+
+			if diff := cmp.Diff(charSet, spinner.chars); diff != "" {
+				t.Fatalf("spinner.chars differs: (-want +got)\n%s", diff)
+			}
+
+			if spinner.maxWidth != tt.maxWidth {
+				t.Errorf("spinner.maxWidth = %d, want %d", spinner.maxWidth, tt.maxWidth)
+			}
+		})
+	}
+}
+
+func TestSpinner_Reverse(t *testing.T) {
+	cfg := Config{
+		Delay:   100 * time.Millisecond,
+		CharSet: CharSets[26],
+	}
+
+	spinner, err := New(cfg)
+
+	testErrCheck(t, "New()", "", err)
+
+	spinner.index = 1
+
+	csRev := make([]character, len(spinner.chars))
+	copy(csRev, spinner.chars)
+
+	for i := len(csRev)/2 - 1; i >= 0; i-- {
+		opp := len(csRev) - 1 - i
+		csRev[i], csRev[opp] = csRev[opp], csRev[i]
+	}
+
+	spinner.Reverse()
+
+	if diff := cmp.Diff(csRev, spinner.chars); diff != "" {
+		t.Errorf("spinner.chars differs: (-want +got)\n%s", diff)
+	}
+
+	if spinner.index != 0 {
+		t.Error("index was not reset")
 	}
 }
