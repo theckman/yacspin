@@ -1,6 +1,7 @@
 package yacspin
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -512,5 +513,53 @@ func TestSpinner_Reverse(t *testing.T) {
 
 	if spinner.index != 0 {
 		t.Error("index was not reset")
+	}
+}
+
+func TestSpinner_erase(t *testing.T) {
+	const want = "\r\033[K\r"
+
+	buf := &bytes.Buffer{}
+
+	spinner := &Spinner{writer: buf}
+
+	testErrCheck(t, "spinner.erase()", "", spinner.erase())
+
+	got := buf.String()
+
+	if got != want {
+		t.Errorf("got = %q, want %q", got, want)
+	}
+}
+
+func TestSpinner_hideCursor(t *testing.T) {
+	const want = "\r\033[?25l\r"
+
+	buf := &bytes.Buffer{}
+
+	spinner := &Spinner{writer: buf}
+
+	testErrCheck(t, "spinner.hideCursor()", "", spinner.hideCursor())
+
+	got := buf.String()
+
+	if got != want {
+		t.Errorf("got = %q, want %q", got, want)
+	}
+}
+
+func TestSpinner_unhideCursor(t *testing.T) {
+	const want = "\r\033[?25h\r"
+
+	buf := &bytes.Buffer{}
+
+	spinner := &Spinner{writer: buf}
+
+	testErrCheck(t, "spinner.unhideCursor()", "", spinner.unhideCursor())
+
+	got := buf.String()
+
+	if got != want {
+		t.Errorf("got = %q, want %q", got, want)
 	}
 }
