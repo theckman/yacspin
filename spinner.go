@@ -45,56 +45,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-func atomicString(v *atomic.Value) string {
-	av := v.Load()
-	if av == nil {
-		return ""
-	}
-
-	s, ok := av.(string)
-	if !ok {
-		return ""
-	}
-
-	return s
-}
-
 func atomicDuration(u *int64) time.Duration {
 	i64 := atomic.LoadInt64(u)
 
 	return time.Duration(i64)
-}
-
-func atomicColorFn(v *atomic.Value) func(format string, a ...interface{}) string {
-	av := v.Load()
-	if av == nil {
-		return func(format string, a ...interface{}) string {
-			return fmt.Sprintf(format, a...)
-		}
-	}
-
-	fn, ok := av.(func(format string, a ...interface{}) string)
-	if !ok {
-		return func(format string, a ...interface{}) string {
-			return fmt.Sprintf(format, a...)
-		}
-	}
-
-	return fn
-}
-
-func atomicCharacter(v *atomic.Value) character {
-	av := v.Load()
-	if av == nil {
-		return character{}
-	}
-
-	c, ok := av.(character)
-	if !ok {
-		return character{}
-	}
-
-	return c
 }
 
 type character struct {
@@ -200,30 +154,26 @@ type Spinner struct {
 	colorAll     bool
 	cursorHidden bool
 
-	mu       *sync.RWMutex
-	chars    []character
-	maxWidth int
-	index    int
+	active        *uint32
+	delayDuration *int64        // to allow atomic updates
+	cancelCh      chan struct{} // send: Stop(), close: StopFail(); both stop painter
+	duCh          chan struct{}
+	doneCh        chan struct{}
 
-	active   *uint32
-	cancelCh chan struct{} // send: Stop(), close: StopFail(); both stop painter
-	duCh     chan struct{}
-	doneCh   chan struct{}
-
-	delayDuration *int64 // to allow atomic updates
-
-	colorFn *atomic.Value
-	prefix  *atomic.Value
-	suffix  *atomic.Value
-	message *atomic.Value
-
-	stopMsg     *atomic.Value
-	stopChar    *atomic.Value
-	stopColorFn *atomic.Value
-
-	stopFailMsg     *atomic.Value
-	stopFailChar    *atomic.Value
-	stopFailColorFn *atomic.Value
+	mu              *sync.Mutex
+	chars           []character
+	maxWidth        int
+	index           int
+	prefix          string
+	suffix          string
+	message         string
+	colorFn         func(format string, a ...interface{}) string
+	stopMsg         string
+	stopChar        character
+	stopColorFn     func(format string, a ...interface{}) string
+	stopFailMsg     string
+	stopFailChar    character
+	stopFailColorFn func(format string, a ...interface{}) string
 }
 
 // New creates a new unstarted spinner.
@@ -233,26 +183,16 @@ func New(cfg Config) (*Spinner, error) {
 	}
 
 	s := &Spinner{
-		mu:            &sync.RWMutex{},
+		mu:            &sync.Mutex{},
 		delayDuration: int64Ptr(int64(cfg.Delay)),
 		active:        uint32Ptr(0),
 		duCh:          make(chan struct{}, 1),
 
-		colorAll:     cfg.ColorAll,
-		cursorHidden: cfg.HideCursor,
-
-		colorFn: &atomic.Value{},
-		prefix:  &atomic.Value{},
-		suffix:  &atomic.Value{},
-		message: &atomic.Value{},
-
-		stopMsg:     &atomic.Value{},
-		stopChar:    &atomic.Value{},
-		stopColorFn: &atomic.Value{},
-
-		stopFailMsg:     &atomic.Value{},
-		stopFailChar:    &atomic.Value{},
-		stopFailColorFn: &atomic.Value{},
+		colorAll:        cfg.ColorAll,
+		cursorHidden:    cfg.HideCursor,
+		colorFn:         fmt.Sprintf,
+		stopColorFn:     fmt.Sprintf,
+		stopFailColorFn: fmt.Sprintf,
 	}
 
 	if err := s.Colors(cfg.Colors...); err != nil {
@@ -445,9 +385,14 @@ func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struc
 func (s *Spinner) paintUpdate(timer *time.Timer) {
 	s.mu.Lock()
 
+	p := s.prefix
+	m := s.message
+	suf := s.suffix
+	mw := s.maxWidth
+	cFn := s.colorFn
 	c := s.chars[s.index]
-	s.index++
 
+	s.index++
 	if s.index == len(s.chars) {
 		s.index = 0
 	}
@@ -464,7 +409,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 		}
 	}
 
-	if err := s.paint(c, atomicString(s.message), atomicColorFn(s.colorFn)); err != nil {
+	if err := paint(s.writer, mw, c, p, m, suf, s.colorAll, cFn); err != nil {
 		panic(fmt.Sprintf("failed to paint line: %v", err))
 	}
 
@@ -472,6 +417,28 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 }
 
 func (s *Spinner) paintStop(chanOk bool) {
+	var m string
+	var c character
+	var cFn func(format string, a ...interface{}) string
+
+	s.mu.Lock()
+
+	if chanOk {
+		c = s.stopChar
+		cFn = s.stopColorFn
+		m = s.stopMsg
+	} else {
+		c = s.stopFailChar
+		cFn = s.stopFailColorFn
+		m = s.stopFailMsg
+	}
+
+	p := s.prefix
+	suf := s.suffix
+	mw := s.maxWidth
+
+	s.mu.Unlock()
+
 	if err := s.erase(); err != nil {
 		panic(fmt.Sprintf("failed to erase line: %v", err))
 	}
@@ -482,26 +449,12 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 	}
 
-	var m string
-	var c character
-	var cFn func(format string, a ...interface{}) string
-
-	if chanOk {
-		c = atomicCharacter(s.stopChar)
-		cFn = atomicColorFn(s.stopColorFn)
-		m = atomicString(s.stopMsg)
-	} else {
-		c = atomicCharacter(s.stopFailChar)
-		cFn = atomicColorFn(s.stopFailColorFn)
-		m = atomicString(s.stopFailMsg)
-	}
-
 	if c.Size == 0 && len(m) == 0 {
 		return
 	}
 
 	// paint the line with a newline as it's the final line
-	if err := s.paint(c, m+"\n", cFn); err != nil {
+	if err := paint(s.writer, mw, c, p, m+"\n", suf, s.colorAll, cFn); err != nil {
 		panic(fmt.Sprintf("failed to paint stop line: %v", err))
 	}
 }
@@ -531,32 +484,29 @@ func padChar(char character, maxWidth int) string {
 
 // paint writes a single line to the s.writer, using the provided character,
 // message, and color function
-func (s *Spinner) paint(char character, message string, colorFn func(format string, a ...interface{}) string) error {
+func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, colorAll bool, colorFn func(format string, a ...interface{}) string) error {
 	if char.Size == 0 {
-		if s.colorAll {
-			fmt.Fprint(s.writer, colorFn(message))
+		if colorAll {
+			fmt.Fprint(w, colorFn(message))
 		} else {
-			fmt.Fprint(s.writer, message)
+			fmt.Fprint(w, message)
 		}
 
 		return nil
 	}
 
-	p, suf := atomicString(s.prefix), atomicString(s.suffix)
-
-	if len(suf) > 0 {
+	if len(suffix) > 0 {
 		if len(message) > 0 && message != "\n" {
-			suf += ": "
+			suffix += ": "
 		}
 	}
 
-	c := padChar(char, s.maxWidth)
+	c := padChar(char, maxWidth)
 
-	if s.colorAll {
-		fmt.Fprint(s.writer, colorFn("%s%s%s%s", p, c, suf, message))
+	if colorAll {
+		fmt.Fprint(w, colorFn("%s%s%s%s", prefix, c, suffix, message))
 	} else {
-		c = colorFn(c)
-		fmt.Fprintf(s.writer, "%s%s%s%s", p, c, suf, message)
+		fmt.Fprintf(w, "%s%s%s%s", prefix, colorFn(c), suffix, message)
 	}
 
 	return nil
@@ -581,18 +531,27 @@ func (s *Spinner) Delay(d time.Duration) error {
 
 // Prefix updates the Prefix before the spinner character.
 func (s *Spinner) Prefix(prefix string) {
-	s.prefix.Store(prefix)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.prefix = prefix
 }
 
 // Suffix updates the Suffix after the spinner character. It's recommended that
 // this start with an empty space.
 func (s *Spinner) Suffix(suffix string) {
-	s.suffix.Store(suffix)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.suffix = suffix
 }
 
 // Message updates the Message displayed after he suffix.
 func (s *Spinner) Message(message string) {
-	s.message.Store(message)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.message = message
 }
 
 // Colors updates the github.com/fatih/colors for printing the spinner line.
@@ -606,15 +565,20 @@ func (s *Spinner) Colors(colors ...string) error {
 		return errors.Wrapf(err, "failed to build color function")
 	}
 
-	s.colorFn.Store(colorFn)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.colorFn = colorFn
 
 	return nil
 }
 
 // StopMessage updates the Message used when Stop() is called.
 func (s *Spinner) StopMessage(message string) {
-	s.stopMsg.Store(message)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
+	s.stopMsg = message
 }
 
 // StopColors updates the colors used for the stop message. See Colors() method
@@ -625,7 +589,10 @@ func (s *Spinner) StopColors(colors ...string) error {
 		return errors.Wrapf(err, "failed to build stop color function")
 	}
 
-	s.stopColorFn.Store(colorFn)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.stopColorFn = colorFn
 
 	return nil
 }
@@ -638,17 +605,19 @@ func (s *Spinner) StopCharacter(char string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.stopChar = character{Value: char, Size: n}
+
 	if n > s.maxWidth {
 		s.maxWidth = n
 	}
-
-	s.stopChar.Store(character{Value: char, Size: n})
 }
 
 // StopFailMessage updates the Message used when StopFail() is called.
 func (s *Spinner) StopFailMessage(message string) {
-	s.stopFailMsg.Store(message)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
+	s.stopFailMsg = message
 }
 
 // StopFailColors updates the colors used for the StopFail message. See Colors() method
@@ -659,7 +628,10 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 		return errors.Wrapf(err, "failed to build stop fail color function")
 	}
 
-	s.stopFailColorFn.Store(colorFn)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.stopFailColorFn = colorFn
 
 	return nil
 }
@@ -672,11 +644,11 @@ func (s *Spinner) StopFailCharacter(char string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.stopFailChar = character{Value: char, Size: n}
+
 	if n > s.maxWidth {
 		s.maxWidth = n
 	}
-
-	s.stopFailChar.Store(character{Value: char, Size: n})
 }
 
 // CharSet updates the set of characters (strings) to use for the spinner. You
@@ -693,16 +665,12 @@ func (s *Spinner) CharSet(cs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// do this inside of the mutex to avoid races with
-	// StopCharacter() and StopFailCharacter()
-	sc := atomicCharacter(s.stopChar)
-	if sc.Size > mw {
-		mw = sc.Size
+	if n := s.stopChar.Size; n > mw {
+		mw = s.stopChar.Size
 	}
 
-	sc = atomicCharacter(s.stopFailChar)
-	if sc.Size > mw {
-		mw = sc.Size
+	if n := s.stopFailChar.Size; n > mw {
+		mw = n
 	}
 
 	s.chars = chars

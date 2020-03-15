@@ -45,41 +45,6 @@ func testErrCheck(t *testing.T, name string, errContains string, err error) bool
 	return true
 }
 
-func Test_atomicString(t *testing.T) {
-	tests := []struct {
-		name  string
-		store interface{}
-		want  string
-	}{
-		{
-			name: "nil_value",
-		},
-		{
-			name:  "non-string",
-			store: 42,
-		},
-		{
-			name:  "string",
-			store: "42",
-			want:  "42",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := &atomic.Value{}
-
-			if tt.store != nil {
-				v.Store(tt.store)
-			}
-
-			if got := atomicString(v); got != tt.want {
-				t.Fatalf("got = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_atomicDuration(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -97,89 +62,6 @@ func Test_atomicDuration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := atomicDuration(tt.value); got != tt.want {
 				t.Fatalf("got = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_atomicColorFn(t *testing.T) {
-	tests := []struct {
-		name  string
-		store interface{}
-		want  string
-	}{
-		{
-			name: "nil_value",
-			want: `test "output"`,
-		},
-		{
-			name:  "non-fn",
-			store: 42,
-			want:  `test "output"`,
-		},
-		{
-			name: "test_func",
-			store: func(format string, a ...interface{}) string {
-				format = "xxx " + format
-				return fmt.Sprintf(format, a...)
-			},
-			want: `xxx test "output"`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := &atomic.Value{}
-
-			if tt.store != nil {
-				v.Store(tt.store)
-			}
-
-			fn := atomicColorFn(v)
-
-			if got := fn("test %q", "output"); got != tt.want {
-				t.Fatalf("got = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_atomicCharacter(t *testing.T) {
-	tests := []struct {
-		name  string
-		store interface{}
-		want  character
-	}{
-		{
-			name: "nil_value",
-		},
-		{
-			name:  "non-character",
-			store: 42,
-		},
-		{
-			name: "character",
-			store: character{
-				Value: "The Answer To Life the Universe and Everything",
-				Size:  42,
-			},
-			want: character{
-				Value: "The Answer To Life the Universe and Everything",
-				Size:  42,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := &atomic.Value{}
-
-			if tt.store != nil {
-				v.Store(tt.store)
-			}
-
-			if got := atomicCharacter(v); got != tt.want {
-				t.Fatalf("got = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -307,69 +189,34 @@ func TestNew(t *testing.T) {
 				t.Errorf("spinner.writer = %#v, want %#v", spinner.writer, tt.writer)
 			}
 
-			if spinner.prefix == nil {
-				t.Fatal("spinner.prefix is nil")
+			if spinner.prefix != tt.cfg.Prefix {
+				t.Errorf("spinner.prefix = %q, want %q", spinner.prefix, tt.cfg.Prefix)
 			}
 
-			prefix := atomicString(spinner.prefix)
-			if prefix != tt.cfg.Prefix {
-				t.Errorf("spinner.prefix = %q, want %q", prefix, tt.cfg.Prefix)
+			if spinner.suffix != tt.cfg.Suffix {
+				t.Errorf("spinner.suffix = %q, want %q", spinner.suffix, tt.cfg.Suffix)
 			}
 
-			if spinner.suffix == nil {
-				t.Fatal("spinner.suffix is nil")
+			if spinner.message != tt.cfg.Message {
+				t.Errorf("spinner.message = %q, want %q", spinner.message, tt.cfg.Message)
 			}
 
-			suffix := atomicString(spinner.suffix)
-			if suffix != tt.cfg.Suffix {
-				t.Errorf("spinner.suffix = %q, want %q", suffix, tt.cfg.Suffix)
+			if spinner.stopMsg != tt.cfg.StopMessage {
+				t.Errorf("spinner.stopMsg = %q, want %q", spinner.stopMsg, tt.cfg.StopMessage)
 			}
 
-			if spinner.message == nil {
-				t.Fatal("spinner.message is nil")
-			}
-
-			message := atomicString(spinner.message)
-			if message != tt.cfg.Message {
-				t.Errorf("spinner.message = %q, want %q", message, tt.cfg.Message)
-			}
-
-			if spinner.stopMsg == nil {
-				t.Fatal("spinner.stopMsg is nil")
-			}
-
-			stopMsg := atomicString(spinner.stopMsg)
-			if stopMsg != tt.cfg.StopMessage {
-				t.Errorf("spinner.stopMsg = %q, want %q", stopMsg, tt.cfg.StopMessage)
-			}
-
-			if spinner.stopChar == nil {
-				t.Fatal("spinner.stopChar is nil")
-			}
-
-			stopChar := atomicCharacter(spinner.stopChar)
 			sc := character{Value: tt.cfg.StopCharacter, Size: runewidth.StringWidth(tt.cfg.StopCharacter)}
-			if stopChar != sc {
-				t.Errorf("spinner.stopChar = %#v, want %#v", stopChar, sc)
+			if spinner.stopChar != sc {
+				t.Errorf("spinner.stopChar = %#v, want %#v", spinner.stopChar, sc)
 			}
 
-			if spinner.stopFailMsg == nil {
-				t.Fatal("spinner.stopFailMsg is nil")
+			if spinner.stopFailMsg != tt.cfg.StopFailMessage {
+				t.Errorf("spinner.stopFailMsg = %q, want %q", spinner.stopFailMsg, tt.cfg.StopFailMessage)
 			}
 
-			stopFailMsg := atomicString(spinner.stopFailMsg)
-			if stopFailMsg != tt.cfg.StopFailMessage {
-				t.Errorf("spinner.stopFailMsg = %q, want %q", stopFailMsg, tt.cfg.StopFailMessage)
-			}
-
-			if spinner.stopFailChar == nil {
-				t.Fatal("spinner.stopFailChar is nil")
-			}
-
-			stopFailChar := atomicCharacter(spinner.stopFailChar)
 			sfc := character{Value: tt.cfg.StopFailCharacter, Size: runewidth.StringWidth(tt.cfg.StopFailCharacter)}
-			if stopFailChar != sfc {
-				t.Errorf("spinner.stopFailChar = %#v, want %#v", stopFailChar, sfc)
+			if spinner.stopFailChar != sfc {
+				t.Errorf("spinner.stopFailChar = %#v, want %#v", spinner.stopFailChar, sfc)
 			}
 
 			if spinner.colorFn == nil {
@@ -387,9 +234,7 @@ func TestNew(t *testing.T) {
 			}
 
 			tfn := color.New(a...).SprintfFunc()
-			sfn := atomicColorFn(spinner.colorFn)
-
-			gotStr, wantStr := sfn("%s: %d", "test string", 42), tfn("%s: %d", "test string", 42)
+			gotStr, wantStr := spinner.colorFn("%s: %d", "test string", 42), tfn("%s: %d", "test string", 42)
 
 			if gotStr != wantStr {
 				t.Errorf(`spinner.colorFn("%%s: %%d", "test string", 42) = %q, want %q`, gotStr, wantStr)
@@ -410,9 +255,8 @@ func TestNew(t *testing.T) {
 			}
 
 			tfn = color.New(a...).SprintfFunc()
-			sfn = atomicColorFn(spinner.stopColorFn)
 
-			gotStr, wantStr = sfn("%s: %d", "test string", 42), tfn("%s: %d", "test string", 42)
+			gotStr, wantStr = spinner.stopColorFn("%s: %d", "test string", 42), tfn("%s: %d", "test string", 42)
 
 			if gotStr != wantStr {
 				t.Errorf(`spinner.stopColorFn("%%s: %%d", "test string", 42) = %q, want %q`, gotStr, wantStr)
@@ -433,9 +277,8 @@ func TestNew(t *testing.T) {
 			}
 
 			tfn = color.New(a...).SprintfFunc()
-			sfn = atomicColorFn(spinner.stopFailColorFn)
 
-			gotStr, wantStr = sfn("%s: %d", "test string", 42), tfn("%s: %d", "test string", 42)
+			gotStr, wantStr = spinner.stopFailColorFn("%s: %d", "test string", 42), tfn("%s: %d", "test string", 42)
 
 			if gotStr != wantStr {
 				t.Errorf(`spinner.stopFailColorFn("%%s: %%d", "test string", 42) = %q, want %q`, gotStr, wantStr)
@@ -619,17 +462,15 @@ func TestSpinner_CharSet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			spinner := &Spinner{
-				mu:           &sync.RWMutex{},
-				stopChar:     &atomic.Value{},
-				stopFailChar: &atomic.Value{},
+				mu: &sync.Mutex{},
 			}
 
 			if tt.stopChar != nil {
-				spinner.stopChar.Store(*tt.stopChar)
+				spinner.stopChar = *tt.stopChar
 			}
 
 			if tt.stopFailChar != nil {
-				spinner.stopFailChar.Store(*tt.stopFailChar)
+				spinner.stopFailChar = *tt.stopFailChar
 			}
 
 			err := spinner.CharSet(tt.charSet)
@@ -682,14 +523,13 @@ func TestSpinner_StopCharacter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			spinner := &Spinner{
-				mu:       &sync.RWMutex{},
-				stopChar: &atomic.Value{},
+				mu:       &sync.Mutex{},
 				maxWidth: 2,
 			}
 
 			spinner.StopCharacter(tt.char)
 
-			c := atomicCharacter(spinner.stopChar)
+			c := spinner.stopChar
 
 			if c.Value != tt.char {
 				t.Fatalf("c.Value = %q, want %q", c.Value, tt.char)
@@ -730,14 +570,13 @@ func TestSpinner_StopFailCharacter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			spinner := &Spinner{
-				mu:           &sync.RWMutex{},
-				stopFailChar: &atomic.Value{},
-				maxWidth:     2,
+				mu:       &sync.Mutex{},
+				maxWidth: 2,
 			}
 
 			spinner.StopFailCharacter(tt.char)
 
-			c := atomicCharacter(spinner.stopFailChar)
+			c := spinner.stopFailChar
 
 			if c.Value != tt.char {
 				t.Fatalf("c.Value = %q, want %q", c.Value, tt.char)
@@ -843,42 +682,24 @@ func TestSpinner_Start(t *testing.T) {
 		{
 			name: "running_spinner",
 			spinner: &Spinner{
-				active:        uint32Ptr(2),
-				mu:            &sync.RWMutex{},
-				delayDuration: int64Ptr(int64(time.Millisecond)),
-				colorFn:       &atomic.Value{},
-				prefix:        &atomic.Value{},
-				suffix:        &atomic.Value{},
-				message:       &atomic.Value{},
-
-				stopMsg:     &atomic.Value{},
-				stopChar:    &atomic.Value{},
-				stopColorFn: &atomic.Value{},
-
-				stopFailMsg:     &atomic.Value{},
-				stopFailChar:    &atomic.Value{},
-				stopFailColorFn: &atomic.Value{},
+				active:          uint32Ptr(2),
+				mu:              &sync.Mutex{},
+				delayDuration:   int64Ptr(int64(time.Millisecond)),
+				colorFn:         fmt.Sprintf,
+				stopColorFn:     fmt.Sprintf,
+				stopFailColorFn: fmt.Sprintf,
 			},
 			err: "spinner already running or shutting down",
 		},
 		{
 			name: "spinner",
 			spinner: &Spinner{
-				active:        uint32Ptr(0),
-				mu:            &sync.RWMutex{},
-				delayDuration: int64Ptr(int64(time.Millisecond)),
-				colorFn:       &atomic.Value{},
-				prefix:        &atomic.Value{},
-				suffix:        &atomic.Value{},
-				message:       &atomic.Value{},
-
-				stopMsg:     &atomic.Value{},
-				stopChar:    &atomic.Value{},
-				stopColorFn: &atomic.Value{},
-
-				stopFailMsg:     &atomic.Value{},
-				stopFailChar:    &atomic.Value{},
-				stopFailColorFn: &atomic.Value{},
+				active:          uint32Ptr(0),
+				mu:              &sync.Mutex{},
+				delayDuration:   int64Ptr(int64(time.Millisecond)),
+				colorFn:         fmt.Sprintf,
+				stopColorFn:     fmt.Sprintf,
+				stopFailColorFn: fmt.Sprintf,
 			},
 		},
 	}
@@ -909,6 +730,140 @@ func TestSpinner_Start(t *testing.T) {
 
 			if buf.Len() == 0 {
 				t.Fatal("painter did not write data")
+			}
+		})
+	}
+}
+
+func TestSpinner_Stop(t *testing.T) {
+	tests := []struct {
+		name    string
+		spinner *Spinner
+		err     string
+	}{
+		{
+			name: "not_running",
+			spinner: &Spinner{
+				active:   uint32Ptr(0),
+				cancelCh: make(chan struct{}),
+				doneCh:   make(chan struct{}),
+			},
+			err: "spinner not running or shutting down",
+		},
+		{
+			name: "not_running",
+			spinner: &Spinner{
+				active:   uint32Ptr(2),
+				cancelCh: make(chan struct{}),
+				doneCh:   make(chan struct{}),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // create local copy
+		t.Run(tt.name, func(t *testing.T) {
+			var ok bool
+			wait := make(chan struct{})
+
+			go func(doneCh, cancelCh chan struct{}) {
+				close(doneCh)
+				_, ok = <-cancelCh
+				close(wait)
+			}(tt.spinner.doneCh, tt.spinner.cancelCh)
+
+			if cont := testErrCheck(t, "spinner.Stop()", tt.err, tt.spinner.Stop()); !cont {
+				return
+			}
+
+			<-wait
+
+			if !ok {
+				t.Error("expected stop() to send message and not close channel")
+			}
+
+			if tt.spinner.index != 0 {
+				t.Errorf("tt.spinner.index = %d, want 0", tt.spinner.index)
+			}
+
+			if tt.spinner.cancelCh != nil {
+				t.Error("tt.spinner.cancelCh is not nil")
+			}
+
+			if tt.spinner.doneCh != nil {
+				t.Error("tt.spinner.doneCh is not nil")
+			}
+
+			status := atomic.LoadUint32(tt.spinner.active)
+			if status != 0 {
+				t.Errorf("tt.spinner.status = %d, want 0", status)
+			}
+		})
+	}
+}
+
+func TestSpinner_StopFail(t *testing.T) {
+	tests := []struct {
+		name    string
+		spinner *Spinner
+		err     string
+	}{
+		{
+			name: "not_running",
+			spinner: &Spinner{
+				active:   uint32Ptr(0),
+				cancelCh: make(chan struct{}),
+				doneCh:   make(chan struct{}),
+			},
+			err: "spinner not running or shutting down",
+		},
+		{
+			name: "not_running",
+			spinner: &Spinner{
+				active:   uint32Ptr(2),
+				cancelCh: make(chan struct{}),
+				doneCh:   make(chan struct{}),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt // create local copy
+		t.Run(tt.name, func(t *testing.T) {
+			var ok bool
+			wait := make(chan struct{})
+
+			go func(doneCh, cancelCh chan struct{}) {
+				close(doneCh)
+				_, ok = <-cancelCh
+				close(wait)
+			}(tt.spinner.doneCh, tt.spinner.cancelCh)
+
+			if cont := testErrCheck(t, "spinner.Stop()", tt.err, tt.spinner.StopFail()); !cont {
+				return
+			}
+
+			<-wait
+
+			if ok {
+				t.Error("expected stop() to not send message and instead close the channel")
+			}
+
+			if tt.spinner.index != 0 {
+				t.Errorf("tt.spinner.index = %d, want 0", tt.spinner.index)
+			}
+
+			if tt.spinner.cancelCh != nil {
+				t.Error("tt.spinner.cancelCh is not nil")
+			}
+
+			if tt.spinner.doneCh != nil {
+				t.Error("tt.spinner.doneCh is not nil")
+			}
+
+			status := atomic.LoadUint32(tt.spinner.active)
+			if status != 0 {
+				t.Errorf("tt.spinner.status = %d, want 0", status)
 			}
 		})
 	}
