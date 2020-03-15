@@ -68,12 +68,16 @@ func atomicDuration(u *int64) time.Duration {
 func atomicColorFn(v *atomic.Value) func(format string, a ...interface{}) string {
 	av := v.Load()
 	if av == nil {
-		return func(format string, a ...interface{}) string { return "" }
+		return func(format string, a ...interface{}) string {
+			return fmt.Sprintf(format, a...)
+		}
 	}
 
 	fn, ok := av.(func(format string, a ...interface{}) string)
 	if !ok {
-		return func(format string, a ...interface{}) string { return "" }
+		return func(format string, a ...interface{}) string {
+			return fmt.Sprintf(format, a...)
+		}
 	}
 
 	return fn
@@ -267,9 +271,8 @@ func New(cfg Config) (*Spinner, error) {
 		cfg.CharSet = CharSets[9]
 	}
 
-	if err := s.CharSet(cfg.CharSet); err != nil {
-		return nil, err
-	}
+	// can only error if the charset is empty, and we prevent that above
+	_ = s.CharSet(cfg.CharSet)
 
 	if cfg.Writer == nil {
 		cfg.Writer = os.Stdout
@@ -325,11 +328,9 @@ func (s *Spinner) Start() error {
 
 	// we now have atomic guarantees of no other threads starting or running
 
-	cancel, sig := make(chan struct{}, 1), make(chan struct{})
-	s.cancelCh = cancel
-	s.doneCh = sig
+	s.cancelCh, s.doneCh = make(chan struct{}, 1), make(chan struct{})
 
-	go s.painter(cancel, s.duCh, sig)
+	go s.painter(s.cancelCh, s.duCh, s.doneCh)
 
 	// move us to the running state
 	if !atomic.CompareAndSwapUint32(s.active, 1, 2) {
@@ -634,6 +635,13 @@ func (s *Spinner) StopColors(colors ...string) error {
 func (s *Spinner) StopCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if n > s.maxWidth {
+		s.maxWidth = n
+	}
+
 	s.stopChar.Store(character{Value: char, Size: n})
 }
 
@@ -661,6 +669,13 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 func (s *Spinner) StopFailCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if n > s.maxWidth {
+		s.maxWidth = n
+	}
+
 	s.stopFailChar.Store(character{Value: char, Size: n})
 }
 
@@ -677,6 +692,18 @@ func (s *Spinner) CharSet(cs []string) error {
 	chars, mw := setToCharSlice(cs)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// do this inside of the mutex to avoid races with
+	// StopCharacter() and StopFailCharacter()
+	sc := atomicCharacter(s.stopChar)
+	if sc.Size > mw {
+		mw = sc.Size
+	}
+
+	sc = atomicCharacter(s.stopFailChar)
+	if sc.Size > mw {
+		mw = sc.Size
+	}
 
 	s.chars = chars
 	s.maxWidth = mw
