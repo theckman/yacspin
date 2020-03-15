@@ -2,6 +2,7 @@ package yacspin
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -42,6 +43,146 @@ func testErrCheck(t *testing.T, name string, errContains string, err error) bool
 	}
 
 	return true
+}
+
+func Test_atomicString(t *testing.T) {
+	tests := []struct {
+		name  string
+		store interface{}
+		want  string
+	}{
+		{
+			name: "nil_value",
+		},
+		{
+			name:  "non-string",
+			store: 42,
+		},
+		{
+			name:  "string",
+			store: "42",
+			want:  "42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &atomic.Value{}
+
+			if tt.store != nil {
+				v.Store(tt.store)
+			}
+
+			if got := atomicString(v); got != tt.want {
+				t.Fatalf("got = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_atomicDuration(t *testing.T) {
+	tests := []struct {
+		name  string
+		value *int64
+		want  time.Duration
+	}{
+		{
+			name:  "42",
+			value: int64Ptr(42),
+			want:  42,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := atomicDuration(tt.value); got != tt.want {
+				t.Fatalf("got = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_atomicColorFn(t *testing.T) {
+	tests := []struct {
+		name  string
+		store interface{}
+		want  string
+	}{
+		{
+			name: "nil_value",
+			want: `test "output"`,
+		},
+		{
+			name:  "non-fn",
+			store: 42,
+			want:  `test "output"`,
+		},
+		{
+			name: "test_func",
+			store: func(format string, a ...interface{}) string {
+				format = "xxx " + format
+				return fmt.Sprintf(format, a...)
+			},
+			want: `xxx test "output"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &atomic.Value{}
+
+			if tt.store != nil {
+				v.Store(tt.store)
+			}
+
+			fn := atomicColorFn(v)
+
+			if got := fn("test %q", "output"); got != tt.want {
+				t.Fatalf("got = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_atomicCharacter(t *testing.T) {
+	tests := []struct {
+		name  string
+		store interface{}
+		want  character
+	}{
+		{
+			name: "nil_value",
+		},
+		{
+			name:  "non-character",
+			store: 42,
+		},
+		{
+			name: "character",
+			store: character{
+				Value: "The Answer To Life the Universe and Everything",
+				Size:  42,
+			},
+			want: character{
+				Value: "The Answer To Life the Universe and Everything",
+				Size:  42,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &atomic.Value{}
+
+			if tt.store != nil {
+				v.Store(tt.store)
+			}
+
+			if got := atomicCharacter(v); got != tt.want {
+				t.Fatalf("got = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestNew(t *testing.T) {
@@ -439,10 +580,12 @@ func TestSpinner_Delay(t *testing.T) {
 
 func TestSpinner_CharSet(t *testing.T) {
 	tests := []struct {
-		name     string
-		charSet  []string
-		maxWidth int
-		err      string
+		name         string
+		stopChar     *character
+		stopFailChar *character
+		charSet      []string
+		maxWidth     int
+		err          string
 	}{
 		{
 			name: "no_charset",
@@ -453,11 +596,41 @@ func TestSpinner_CharSet(t *testing.T) {
 			charSet:  CharSets[59],
 			maxWidth: 3,
 		},
+		{
+			name: "charset_with_big_stopChar",
+			stopChar: &character{
+				Value: "xxxx",
+				Size:  4,
+			},
+			charSet:  CharSets[59],
+			maxWidth: 4,
+		},
+		{
+			name: "charset_with_big_stopFailChar",
+			stopFailChar: &character{
+				Value: "xxxxx",
+				Size:  5,
+			},
+			charSet:  CharSets[59],
+			maxWidth: 5,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spinner := &Spinner{mu: &sync.RWMutex{}}
+			spinner := &Spinner{
+				mu:           &sync.RWMutex{},
+				stopChar:     &atomic.Value{},
+				stopFailChar: &atomic.Value{},
+			}
+
+			if tt.stopChar != nil {
+				spinner.stopChar.Store(*tt.stopChar)
+			}
+
+			if tt.stopFailChar != nil {
+				spinner.stopFailChar.Store(*tt.stopFailChar)
+			}
 
 			err := spinner.CharSet(tt.charSet)
 
@@ -480,6 +653,102 @@ func TestSpinner_CharSet(t *testing.T) {
 
 			if spinner.maxWidth != tt.maxWidth {
 				t.Errorf("spinner.maxWidth = %d, want %d", spinner.maxWidth, tt.maxWidth)
+			}
+		})
+	}
+}
+
+func TestSpinner_StopCharacter(t *testing.T) {
+	tests := []struct {
+		name     string
+		char     string
+		charSize int
+		mw       int
+	}{
+		{
+			name:     "smaller_size",
+			char:     "x",
+			charSize: 1,
+			mw:       2,
+		},
+		{
+			name:     "larger_size",
+			char:     "xxx",
+			charSize: 3,
+			mw:       3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spinner := &Spinner{
+				mu:       &sync.RWMutex{},
+				stopChar: &atomic.Value{},
+				maxWidth: 2,
+			}
+
+			spinner.StopCharacter(tt.char)
+
+			c := atomicCharacter(spinner.stopChar)
+
+			if c.Value != tt.char {
+				t.Fatalf("c.Value = %q, want %q", c.Value, tt.char)
+			}
+
+			if c.Size != tt.charSize {
+				t.Fatalf("c.Size = %d, want %d", c.Size, tt.charSize)
+			}
+
+			if spinner.maxWidth != tt.mw {
+				t.Fatalf("spinner.maxWidth = %d, want %d", spinner.maxWidth, tt.mw)
+			}
+		})
+	}
+}
+
+func TestSpinner_StopFailCharacter(t *testing.T) {
+	tests := []struct {
+		name     string
+		char     string
+		charSize int
+		mw       int
+	}{
+		{
+			name:     "smaller_size",
+			char:     "x",
+			charSize: 1,
+			mw:       2,
+		},
+		{
+			name:     "larger_size",
+			char:     "xxx",
+			charSize: 3,
+			mw:       3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spinner := &Spinner{
+				mu:           &sync.RWMutex{},
+				stopFailChar: &atomic.Value{},
+				maxWidth:     2,
+			}
+
+			spinner.StopFailCharacter(tt.char)
+
+			c := atomicCharacter(spinner.stopFailChar)
+
+			if c.Value != tt.char {
+				t.Fatalf("c.Value = %q, want %q", c.Value, tt.char)
+			}
+
+			if c.Size != tt.charSize {
+				t.Fatalf("c.Size = %d, want %d", c.Size, tt.charSize)
+			}
+
+			if spinner.maxWidth != tt.mw {
+				t.Fatalf("spinner.maxWidth = %d, want %d", spinner.maxWidth, tt.mw)
 			}
 		})
 	}
@@ -561,5 +830,86 @@ func TestSpinner_unhideCursor(t *testing.T) {
 
 	if got != want {
 		t.Errorf("got = %q, want %q", got, want)
+	}
+}
+
+func TestSpinner_Start(t *testing.T) {
+	tests := []struct {
+		name    string
+		spinner *Spinner
+
+		err string
+	}{
+		{
+			name: "running_spinner",
+			spinner: &Spinner{
+				active:        uint32Ptr(2),
+				mu:            &sync.RWMutex{},
+				delayDuration: int64Ptr(int64(time.Millisecond)),
+				colorFn:       &atomic.Value{},
+				prefix:        &atomic.Value{},
+				suffix:        &atomic.Value{},
+				message:       &atomic.Value{},
+
+				stopMsg:     &atomic.Value{},
+				stopChar:    &atomic.Value{},
+				stopColorFn: &atomic.Value{},
+
+				stopFailMsg:     &atomic.Value{},
+				stopFailChar:    &atomic.Value{},
+				stopFailColorFn: &atomic.Value{},
+			},
+			err: "spinner already running or shutting down",
+		},
+		{
+			name: "spinner",
+			spinner: &Spinner{
+				active:        uint32Ptr(0),
+				mu:            &sync.RWMutex{},
+				delayDuration: int64Ptr(int64(time.Millisecond)),
+				colorFn:       &atomic.Value{},
+				prefix:        &atomic.Value{},
+				suffix:        &atomic.Value{},
+				message:       &atomic.Value{},
+
+				stopMsg:     &atomic.Value{},
+				stopChar:    &atomic.Value{},
+				stopColorFn: &atomic.Value{},
+
+				stopFailMsg:     &atomic.Value{},
+				stopFailChar:    &atomic.Value{},
+				stopFailColorFn: &atomic.Value{},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			tt.spinner.writer = buf
+			_ = tt.spinner.CharSet(CharSets[26])
+
+			err := tt.spinner.Start()
+
+			if cont := testErrCheck(t, "Start()", tt.err, err); !cont {
+				return
+			}
+
+			if tt.spinner.cancelCh == nil {
+				t.Fatal("tt.spinner.cancelCh == nil")
+			}
+
+			if tt.spinner.doneCh == nil {
+				t.Fatal("tt.spinner.doneCh == nil")
+			}
+
+			close(tt.spinner.cancelCh)
+
+			<-tt.spinner.doneCh
+
+			if buf.Len() == 0 {
+				t.Fatal("painter did not write data")
+			}
+		})
 	}
 }
