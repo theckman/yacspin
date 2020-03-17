@@ -1131,3 +1131,45 @@ func Test_setToCharSlice(t *testing.T) {
 		})
 	}
 }
+
+func TestSpinner_painter(t *testing.T) {
+	const want = "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\ray msg\r\x1b[K\rav stop\n"
+
+	buf := &bytes.Buffer{}
+
+	spinner := &Spinner{
+		mu:            &sync.Mutex{},
+		writer:        buf,
+		prefix:        "a",
+		message:       "msg",
+		suffix:        " ",
+		maxWidth:      1,
+		colorFn:       fmt.Sprintf,
+		chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+		stopColorFn:   fmt.Sprintf,
+		stopMsg:       "stop",
+		stopChar:      character{Value: "v", Size: 1},
+		delayDuration: int64Ptr(int64(20 * time.Millisecond)),
+	}
+
+	cancel, delayUpdate, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+
+	go spinner.painter(cancel, delayUpdate, done)
+
+	time.Sleep(4 * time.Millisecond)
+
+	atomic.StoreInt64(spinner.delayDuration, int64(5*time.Millisecond))
+	delayUpdate <- struct{}{}
+
+	time.Sleep(8 * time.Millisecond)
+
+	cancel <- struct{}{}
+
+	<-done
+
+	got := buf.String()
+
+	if got != want {
+		t.Fatalf("got = %#v, want %#v", got, want)
+	}
+}
