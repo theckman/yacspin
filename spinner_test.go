@@ -868,3 +868,266 @@ func TestSpinner_StopFail(t *testing.T) {
 		})
 	}
 }
+
+func TestSpinner_paintUpdate(t *testing.T) {
+	tests := []struct {
+		name    string
+		spinner *Spinner
+		want    string
+	}{
+		{
+			name: "spinner_no_hide_cursor",
+			spinner: &Spinner{
+				mu:            &sync.Mutex{},
+				prefix:        "a",
+				message:       "msg",
+				suffix:        " ",
+				maxWidth:      1,
+				colorFn:       fmt.Sprintf,
+				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				delayDuration: int64Ptr(10),
+			},
+			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\ray msg",
+		},
+		{
+			name: "spinner_hide_cursor",
+			spinner: &Spinner{
+				cursorHidden:  true,
+				mu:            &sync.Mutex{},
+				prefix:        "a",
+				message:       "msg",
+				suffix:        " ",
+				maxWidth:      1,
+				colorFn:       fmt.Sprintf,
+				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				delayDuration: int64Ptr(10),
+			},
+			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
+		},
+		{
+			name: "spinner_empty_print",
+			spinner: &Spinner{
+				mu:            &sync.Mutex{},
+				maxWidth:      0,
+				colorFn:       fmt.Sprintf,
+				chars:         []character{{Value: "", Size: 0}},
+				delayDuration: int64Ptr(10),
+			},
+			want: "\r\033[K\r\r\033[K\r\r\033[K\r",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			tt.spinner.writer = buf
+
+			tm := time.NewTimer(10 * time.Millisecond)
+
+			tt.spinner.paintUpdate(tm)
+			tt.spinner.paintUpdate(tm)
+			tt.spinner.paintUpdate(tm)
+			tm.Stop()
+
+			got := buf.String()
+
+			if got != tt.want {
+				t.Errorf("got = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSpinner_paintStop(t *testing.T) {
+	tests := []struct {
+		name    string
+		ok      bool
+		spinner *Spinner
+		want    string
+	}{
+		{
+			name: "ok",
+			ok:   true,
+			spinner: &Spinner{
+				mu:          &sync.Mutex{},
+				prefix:      "a",
+				suffix:      " ",
+				maxWidth:    1,
+				stopColorFn: fmt.Sprintf,
+				stopChar:    character{Value: "x", Size: 1},
+				stopMsg:     "stop",
+			},
+			want: "\r\033[K\rax stop\n",
+		},
+		{
+			name: "ok_unhide",
+			ok:   true,
+			spinner: &Spinner{
+				mu:           &sync.Mutex{},
+				cursorHidden: true,
+				prefix:       "a",
+				suffix:       " ",
+				maxWidth:     1,
+				stopColorFn:  fmt.Sprintf,
+				stopChar:     character{Value: "x", Size: 1},
+				stopMsg:      "stop",
+			},
+			want: "\r\033[K\r\r\033[?25h\rax stop\n",
+		},
+		{
+			name: "fail",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopFailColorFn: fmt.Sprintf,
+				stopFailChar:    character{Value: "y", Size: 1},
+				stopFailMsg:     "stop",
+			},
+			want: "\r\033[K\ray stop\n",
+		},
+		{
+			name: "fail_no_char_no_msg",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopFailColorFn: fmt.Sprintf,
+			},
+			want: "\r\033[K\r",
+		},
+		{
+			name: "fail_colorall",
+			spinner: &Spinner{
+				mu:       &sync.Mutex{},
+				prefix:   "a",
+				suffix:   " ",
+				maxWidth: 1,
+				stopFailColorFn: func(format string, a ...interface{}) string {
+					return fmt.Sprintf("fullColor: %s", fmt.Sprintf(format, a...))
+				},
+				stopFailChar: character{Value: "y", Size: 1},
+				stopFailMsg:  "stop",
+				colorAll:     true,
+			},
+			want: "\r\033[K\rfullColor: ay stop\n",
+		},
+		{
+			name: "fail_colorall_no_char",
+			spinner: &Spinner{
+				mu:       &sync.Mutex{},
+				prefix:   "a",
+				suffix:   " ",
+				maxWidth: 0,
+				stopFailColorFn: func(format string, a ...interface{}) string {
+					return fmt.Sprintf("fullColor: %s", fmt.Sprintf(format, a...))
+				},
+				stopFailChar: character{Value: "", Size: 0},
+				stopFailMsg:  "stop",
+				colorAll:     true,
+			},
+			want: "\r\033[K\rfullColor: stop\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			tt.spinner.writer = buf
+
+			tt.spinner.paintStop(tt.ok)
+
+			got := buf.String()
+
+			if got != tt.want {
+				t.Errorf("got = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_handleDelayUpdate(t *testing.T) {
+	tests := []struct {
+		name        string
+		newDelay    time.Duration
+		lastTickAgo time.Duration
+		shouldTick  time.Duration
+	}{
+		{
+			name:        "moreTime",
+			newDelay:    200 * time.Millisecond,
+			lastTickAgo: 100 * time.Millisecond,
+			shouldTick:  (100 * time.Millisecond) + (500 * time.Microsecond),
+		},
+		{
+			name:        "lessTime",
+			newDelay:    100 * time.Millisecond,
+			lastTickAgo: 200 * time.Millisecond,
+			shouldTick:  100 * time.Microsecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			timer := time.NewTimer(0)
+			lastTick := time.Now().Add(-tt.lastTickAgo)
+
+			time.Sleep(10 * time.Microsecond)
+
+			handleDelayUpdate(tt.newDelay, timer, lastTick)
+
+			testTimer := time.NewTimer(tt.shouldTick)
+
+			select {
+			case <-timer.C:
+				testTimer.Stop()
+			case <-testTimer.C:
+				timer.Stop()
+				t.Fatal("timer didn't fire when expected")
+			}
+		})
+	}
+}
+
+func Test_setToCharSlice(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []string
+		wantNil   bool
+		wantChars []character
+		wantSize  int
+	}{
+		{
+			name:    "nil",
+			wantNil: true,
+		},
+		{
+			name:      "full",
+			input:     []string{"x", "zzz"},
+			wantChars: []character{{Value: "x", Size: 1}, {Value: "zzz", Size: 3}},
+			wantSize:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chars, size := setToCharSlice(tt.input)
+
+			if size != tt.wantSize {
+				t.Errorf("size = %d, want %d", size, tt.wantSize)
+			}
+
+			if tt.wantNil && chars != nil {
+				t.Fatal("chars not nil")
+			}
+
+			for i := range chars {
+				if x, y := chars[i], tt.wantChars[i]; x != y {
+					t.Errorf("chars[%d] = %#v, want %#v", i, x, y)
+				}
+			}
+		})
+	}
+}
