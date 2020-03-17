@@ -330,7 +330,7 @@ func (s *Spinner) stop(fail bool) error {
 // handleDelayUpdate is for when the delay duration was changed. This tries to
 // see if we should fire the timer now, or change its current duration to match
 // the new duration.
-func (s *Spinner) handleDelayUpdate(timer *time.Timer, lastTick time.Time) {
+func handleDelayUpdate(newDelay time.Duration, timer *time.Timer, lastTick time.Time) {
 	// if timer fired, drain the channel
 	if !timer.Stop() {
 	timerLoop:
@@ -344,15 +344,14 @@ func (s *Spinner) handleDelayUpdate(timer *time.Timer, lastTick time.Time) {
 	}
 
 	timeSince := time.Since(lastTick)
-	delay := atomicDuration(s.delayDuration)
 
 	// if we've exceeded the new delay trigger timer immediately
-	if timeSince >= delay {
+	if timeSince >= newDelay {
 		timer.Reset(0)
 		return
 	}
 
-	timer.Reset(delay - timeSince)
+	timer.Reset(newDelay - timeSince)
 }
 
 func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struct{}) {
@@ -367,7 +366,7 @@ func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struc
 			s.paintUpdate(timer)
 
 		case <-delayUpdate:
-			s.handleDelayUpdate(timer, lastTick)
+			handleDelayUpdate(atomicDuration(s.delayDuration), timer, lastTick)
 
 		case _, ok := <-cancel:
 			defer close(done)
@@ -493,12 +492,6 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 		}
 
 		return nil
-	}
-
-	if len(suffix) > 0 {
-		if len(message) > 0 && message != "\n" {
-			suffix += ": "
-		}
 	}
 
 	c := padChar(char, maxWidth)
