@@ -309,6 +309,29 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNew_dumbTerm(t *testing.T) {
+	os.Setenv("TERM", "dumb")
+	defer os.Unsetenv("TERM")
+
+	cfg := Config{
+		Delay:         500 * time.Millisecond,
+		CharSet:       CharSets[59],
+		Suffix:        " backing up database to S3: ",
+		Message:       "exporting data to file",
+		StopCharacter: "✓",
+		StopColors:    []string{"fgGreen"},
+		HideCursor:    true,
+		ColorAll:      true,
+	}
+
+	spinner, err := New(cfg)
+	testErrCheck(t, "New()", "", err)
+
+	if !spinner.isDumbTerm {
+		t.Fatal("spinner.isDumbTerm = false, want true")
+	}
+}
+
 func TestSpinner_Active(t *testing.T) {
 	spinner := &Spinner{active: uint32Ptr(0)}
 
@@ -931,7 +954,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				colorFn:       fmt.Sprintf,
 				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				delayDuration: int64Ptr(10),
-				isWindows:     true,
+				isDumbTerm:    true,
 			},
 			want: "\r\ray msg\r      \raz msg\r      \ray msg",
 		},
@@ -1047,7 +1070,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopColorFn:  fmt.Sprintf,
 				stopChar:     character{Value: "x", Size: 1},
 				stopMsg:      "stop",
-				isWindows:    true,
+				isDumbTerm:   true,
 				lastPrintLen: 10,
 			},
 			want: "\r          \rax stop\n",

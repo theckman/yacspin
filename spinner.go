@@ -3,6 +3,9 @@
 // project. Specifically this project borrows the default character sets, and
 // color mappings to github.com/fatih/color colors, from that project.
 //
+// This also supports an alternate mode of operation for Winodws OS and dumb
+// terminals. This is discovered automatically when creating the spinner.
+//
 // Within the yacspin package there are some default spinners stored in the
 // yacspin.CharSets variable, but you can also provide your own. There is also a
 // list of known colors in the yacspin.ValidColors variable.
@@ -161,7 +164,7 @@ type Spinner struct {
 	colorAll        bool
 	cursorHidden    bool
 	suffixAutoColon bool
-	isWindows       bool
+	isDumbTerm      bool
 
 	active        *uint32
 	delayDuration *int64 // to allow atomic updates
@@ -201,7 +204,7 @@ func New(cfg Config) (*Spinner, error) {
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
 		suffixAutoColon: cfg.SuffixAutoColon,
-		isWindows:       runtime.GOOS == "windows",
+		isDumbTerm:      os.Getenv("TERM") == "dumb" || runtime.GOOS == "windows",
 		colorFn:         fmt.Sprintf,
 		stopColorFn:     fmt.Sprintf,
 		stopFailColorFn: fmt.Sprintf,
@@ -410,7 +413,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 
 	s.mu.Unlock()
 
-	if !s.isWindows {
+	if !s.isDumbTerm {
 		if err := s.erase(); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
@@ -464,7 +467,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 	s.mu.Unlock()
 
-	if !s.isWindows {
+	if !s.isDumbTerm {
 		if err := s.erase(); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
