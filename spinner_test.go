@@ -890,6 +890,21 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
 		{
+			name: "spinner_no_hide_cursor_auto_cursor",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				message:         "msg",
+				suffix:          " ",
+				maxWidth:        1,
+				colorFn:         fmt.Sprintf,
+				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				delayDuration:   int64Ptr(10),
+				suffixAutoColon: true,
+			},
+			want: "\r\033[K\ray : msg\r\033[K\raz : msg\r\033[K\ray : msg",
+		},
+		{
 			name: "spinner_hide_cursor",
 			spinner: &Spinner{
 				cursorHidden:  true,
@@ -974,6 +989,36 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopMsg:     "stop",
 			},
 			want: "\r\033[K\rax stop\n",
+		},
+		{
+			name: "ok_auto_colon",
+			ok:   true,
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopColorFn:     fmt.Sprintf,
+				stopChar:        character{Value: "x", Size: 1},
+				stopMsg:         "stop",
+				suffixAutoColon: true,
+			},
+			want: "\r\033[K\rax : stop\n",
+		},
+		{
+			name: "ok_auto_colon_no_msg",
+			ok:   true,
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopColorFn:     fmt.Sprintf,
+				stopChar:        character{Value: "x", Size: 1},
+				stopMsg:         "",
+				suffixAutoColon: true,
+			},
+			want: "\r\033[K\rax \n",
 		},
 		{
 			name: "ok_unhide",
