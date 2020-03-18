@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -153,9 +154,11 @@ type Spinner struct {
 	writer       io.Writer
 	colorAll     bool
 	cursorHidden bool
+	isWindows    bool
 
 	active        *uint32
-	delayDuration *int64        // to allow atomic updates
+	delayDuration *int64 // to allow atomic updates
+	lastPrintLen  int
 	cancelCh      chan struct{} // send: Stop(), close: StopFail(); both stop painter
 	duCh          chan struct{}
 	doneCh        chan struct{}
@@ -190,6 +193,7 @@ func New(cfg Config) (*Spinner, error) {
 
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
+		isWindows:       runtime.GOOS == "windows",
 		colorFn:         fmt.Sprintf,
 		stopColorFn:     fmt.Sprintf,
 		stopFailColorFn: fmt.Sprintf,
@@ -398,18 +402,32 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 
 	s.mu.Unlock()
 
-	if err := s.erase(); err != nil {
-		panic(fmt.Sprintf("failed to erase line: %v", err))
-	}
-
-	if s.cursorHidden {
-		if err := s.hideCursor(); err != nil {
-			panic(fmt.Sprintf("failed to hide cursor: %v", err))
+	if !s.isWindows {
+		if err := s.erase(); err != nil {
+			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
-	}
 
-	if err := paint(s.writer, mw, c, p, m, suf, s.colorAll, cFn); err != nil {
-		panic(fmt.Sprintf("failed to paint line: %v", err))
+		if s.cursorHidden {
+			if err := s.hideCursor(); err != nil {
+				panic(fmt.Sprintf("failed to hide cursor: %v", err))
+			}
+		}
+
+		if _, err := paint(s.writer, mw, c, p, m, suf, s.colorAll, cFn); err != nil {
+			panic(fmt.Sprintf("failed to paint line: %v", err))
+		}
+	} else {
+		if err := s.eraseWindows(); err != nil {
+			panic(fmt.Sprintf("failed to erase line: %v", err))
+		}
+
+		n, err := paint(s.writer, mw, c, p, m, suf, false, fmt.Sprintf)
+
+		if err != nil {
+			panic(fmt.Sprintf("failed to paint line: %v", err))
+		}
+
+		s.lastPrintLen = n
 	}
 
 	timer.Reset(atomicDuration(s.delayDuration))
@@ -438,29 +456,54 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 	s.mu.Unlock()
 
-	if err := s.erase(); err != nil {
-		panic(fmt.Sprintf("failed to erase line: %v", err))
-	}
-
-	if s.cursorHidden {
-		if err := s.unhideCursor(); err != nil {
-			panic(fmt.Sprintf("failed to unhide cursor: %v", err))
+	if !s.isWindows {
+		if err := s.erase(); err != nil {
+			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
-	}
 
-	if c.Size == 0 && len(m) == 0 {
-		return
-	}
+		if s.cursorHidden {
+			if err := s.unhideCursor(); err != nil {
+				panic(fmt.Sprintf("failed to hide cursor: %v", err))
+			}
+		}
 
-	// paint the line with a newline as it's the final line
-	if err := paint(s.writer, mw, c, p, m+"\n", suf, s.colorAll, cFn); err != nil {
-		panic(fmt.Sprintf("failed to paint stop line: %v", err))
+		if c.Size == 0 && len(m) == 0 {
+			return
+		}
+
+		// paint the line with a newline as it's the final line
+		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.colorAll, cFn); err != nil {
+			panic(fmt.Sprintf("failed to paint line: %v", err))
+		}
+
+	} else {
+		if err := s.eraseWindows(); err != nil {
+			panic(fmt.Sprintf("failed to erase line: %v", err))
+		}
+
+		if c.Size == 0 && len(m) == 0 {
+			return
+		}
+
+		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, false, fmt.Sprintf); err != nil {
+			panic(fmt.Sprintf("failed to paint line: %v", err))
+		}
+
+		s.lastPrintLen = 0
 	}
 }
 
 // erase clears the line
 func (s *Spinner) erase() error {
 	_, err := fmt.Fprint(s.writer, "\r\033[K\r")
+	return err
+}
+
+// eraseWindows clears the line on Windows
+func (s *Spinner) eraseWindows() error {
+	clear := "\r" + strings.Repeat(" ", s.lastPrintLen) + "\r"
+
+	_, err := fmt.Fprint(s.writer, clear)
 	return err
 }
 
@@ -483,26 +526,22 @@ func padChar(char character, maxWidth int) string {
 
 // paint writes a single line to the s.writer, using the provided character,
 // message, and color function
-func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, colorAll bool, colorFn func(format string, a ...interface{}) string) error {
+func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, colorAll bool, colorFn func(format string, a ...interface{}) string) (int, error) {
 	if char.Size == 0 {
 		if colorAll {
-			fmt.Fprint(w, colorFn(message))
-		} else {
-			fmt.Fprint(w, message)
+			return fmt.Fprint(w, colorFn(message))
 		}
 
-		return nil
+		return fmt.Fprint(w, message)
 	}
 
 	c := padChar(char, maxWidth)
 
 	if colorAll {
-		fmt.Fprint(w, colorFn("%s%s%s%s", prefix, c, suffix, message))
-	} else {
-		fmt.Fprintf(w, "%s%s%s%s", prefix, colorFn(c), suffix, message)
+		return fmt.Fprint(w, colorFn("%s%s%s%s", prefix, c, suffix, message))
 	}
 
-	return nil
+	return fmt.Fprintf(w, "%s%s%s%s", prefix, colorFn(c), suffix, message)
 }
 
 // Delay updates the Delay between repainting the line.

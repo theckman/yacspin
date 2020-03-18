@@ -905,6 +905,22 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
 		},
 		{
+			name: "spinner_hide_cursor_windows",
+			spinner: &Spinner{
+				cursorHidden:  true,
+				mu:            &sync.Mutex{},
+				prefix:        "a",
+				message:       "msg",
+				suffix:        " ",
+				maxWidth:      1,
+				colorFn:       fmt.Sprintf,
+				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				delayDuration: int64Ptr(10),
+				isWindows:     true,
+			},
+			want: "\r\ray msg\r      \raz msg\r      \ray msg",
+		},
+		{
 			name: "spinner_empty_print",
 			spinner: &Spinner{
 				mu:            &sync.Mutex{},
@@ -973,6 +989,23 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopMsg:      "stop",
 			},
 			want: "\r\033[K\r\r\033[?25h\rax stop\n",
+		},
+		{
+			name: "ok_unhide_windows",
+			ok:   true,
+			spinner: &Spinner{
+				mu:           &sync.Mutex{},
+				cursorHidden: true,
+				prefix:       "a",
+				suffix:       " ",
+				maxWidth:     1,
+				stopColorFn:  fmt.Sprintf,
+				stopChar:     character{Value: "x", Size: 1},
+				stopMsg:      "stop",
+				isWindows:    true,
+				lastPrintLen: 10,
+			},
+			want: "\r          \rax stop\n",
 		},
 		{
 			name: "fail",
