@@ -115,6 +115,12 @@ type Config struct {
 	// recommended that this string starts with an space ` ` character.
 	Suffix string
 
+	// SuffixAutoColon configures whether the spinner adds a colon after the
+	// suffix automatically. If there is a message, a colon followed by a space
+	// is added to the suffix. Otherwise, if there is no message the colon is
+	// omitted.
+	SuffixAutoColon bool
+
 	// Message is the string printed after the suffix. If a suffix is present,
 	// `: ` is appended to the suffix before printing the message. It results in
 	// a message like:
@@ -151,10 +157,11 @@ type Config struct {
 //
 // Note: You need to use New() to construct a *Spinner.
 type Spinner struct {
-	writer       io.Writer
-	colorAll     bool
-	cursorHidden bool
-	isWindows    bool
+	writer          io.Writer
+	colorAll        bool
+	cursorHidden    bool
+	suffixAutoColon bool
+	isWindows       bool
 
 	active        *uint32
 	delayDuration *int64 // to allow atomic updates
@@ -193,6 +200,7 @@ func New(cfg Config) (*Spinner, error) {
 
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
+		suffixAutoColon: cfg.SuffixAutoColon,
 		isWindows:       runtime.GOOS == "windows",
 		colorFn:         fmt.Sprintf,
 		stopColorFn:     fmt.Sprintf,
@@ -413,7 +421,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 			}
 		}
 
-		if _, err := paint(s.writer, mw, c, p, m, suf, s.colorAll, cFn); err != nil {
+		if _, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 	} else {
@@ -421,7 +429,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.writer, mw, c, p, m, suf, false, fmt.Sprintf)
+		n, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, false, fmt.Sprintf)
 
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
@@ -472,7 +480,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 
 		// paint the line with a newline as it's the final line
-		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.colorAll, cFn); err != nil {
+		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 
@@ -485,7 +493,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 			return
 		}
 
-		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, false, fmt.Sprintf); err != nil {
+		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, false, fmt.Sprintf); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 
@@ -526,7 +534,7 @@ func padChar(char character, maxWidth int) string {
 
 // paint writes a single line to the s.writer, using the provided character,
 // message, and color function
-func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, colorAll bool, colorFn func(format string, a ...interface{}) string) (int, error) {
+func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll bool, colorFn func(format string, a ...interface{}) string) (int, error) {
 	if char.Size == 0 {
 		if colorAll {
 			return fmt.Fprint(w, colorFn(message))
@@ -536,6 +544,12 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 	}
 
 	c := padChar(char, maxWidth)
+
+	if suffixAutoColon {
+		if len(suffix) > 0 && len(message) > 0 && message != "\n" {
+			suffix += ": "
+		}
+	}
 
 	if colorAll {
 		return fmt.Fprint(w, colorFn("%s%s%s%s", prefix, c, suffix, message))
