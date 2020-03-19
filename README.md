@@ -13,18 +13,23 @@ github.com/fatih/color colors, from that project.
 
 ## Usage
 
+```
+go get github.com/theckman/yacspin
+```
+
 Within the `yacspin` package there are some default spinners stored in the
-`yacspin.CharSets` variable, but you can also provide your own. There is also a
+`yacspin.CharSets` variable, and you can also provide your own. There is also a
 list of known colors in the `yacspin.ValidColors` variable.
 
 ```Go
 cfg := yacspin.Config{
-	Delay:         100 * time.Millisecond,
-	CharSet:       yacspin.CharSets[59],
-	Suffix:        " backing up database to S3",
-	Message:       "exporting data",
-	StopCharacter: "✓",
-	StopColors:    []string{"fgGreen"},
+	Delay:           100 * time.Millisecond,
+	CharSet:         yacspin.CharSets[59],
+	Suffix:          " backing up database to S3",
+    SuffixAutoColon: true,
+	Message:         "exporting data",
+	StopCharacter:   "✓",
+	StopColors:      []string{"fgGreen"},
 }
 
 spinner, err := yacspin.New(cfg)
