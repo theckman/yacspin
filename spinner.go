@@ -49,12 +49,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-func atomicDuration(u *int64) time.Duration {
-	i64 := atomic.LoadInt64(u)
-
-	return time.Duration(i64)
-}
-
 type character struct {
 	Value string
 	Size  int
@@ -167,13 +161,14 @@ type Spinner struct {
 	isDumbTerm      bool
 
 	active        *uint32
-	delayDuration *int64 // to allow atomic updates
 	lastPrintLen  int
 	cancelCh      chan struct{} // send: Stop(), close: StopFail(); both stop painter
-	duCh          chan struct{}
+	delayUpdateCh chan time.Duration
+	dataUpdateCh  chan struct{}
 	doneCh        chan struct{}
 
 	mu              *sync.Mutex
+	delayDuration   time.Duration
 	chars           []character
 	maxWidth        int
 	index           int
@@ -197,9 +192,10 @@ func New(cfg Config) (*Spinner, error) {
 
 	s := &Spinner{
 		mu:            &sync.Mutex{},
-		delayDuration: int64Ptr(int64(cfg.Delay)),
+		delayDuration: cfg.Delay,
 		active:        uint32Ptr(0),
-		duCh:          make(chan struct{}, 1),
+		delayUpdateCh: make(chan time.Duration),
+		dataUpdateCh:  make(chan struct{}),
 
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
@@ -266,6 +262,14 @@ func New(cfg Config) (*Spinner, error) {
 	return s, nil
 }
 
+func (s *Spinner) notifyDataChange() {
+	// non-blocking notification
+	select {
+	case s.dataUpdateCh <- struct{}{}:
+	default:
+	}
+}
+
 // Active returns whether the spinner is active. Active means the spinner is
 // either starting or running.
 func (s *Spinner) Active() bool {
@@ -283,9 +287,11 @@ func (s *Spinner) Start() error {
 
 	// we now have atomic guarantees of no other threads starting or running
 
-	s.cancelCh, s.doneCh = make(chan struct{}, 1), make(chan struct{})
+	s.doneCh = make(chan struct{})
+	s.delayUpdateCh = make(chan time.Duration, 1)
+	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
 
-	go s.painter(s.cancelCh, s.duCh, s.doneCh)
+	go s.painter(s.cancelCh, s.dataUpdateCh, s.doneCh, s.delayUpdateCh)
 
 	// move us to the running state
 	if !atomic.CompareAndSwapUint32(s.active, 1, 2) {
@@ -333,6 +339,9 @@ func (s *Spinner) stop(fail bool) error {
 	s.cancelCh = nil
 	s.doneCh = nil
 
+	s.dataUpdateCh = make(chan struct{})       // prevent panic() in various setter methods
+	s.delayUpdateCh = make(chan time.Duration) // prevent panic() in .Delay()
+
 	// move us to the stopped state
 	a = atomic.CompareAndSwapUint32(s.active, 3, 0)
 	if !a {
@@ -369,7 +378,7 @@ func handleDelayUpdate(newDelay time.Duration, timer *time.Timer, lastTick time.
 	timer.Reset(newDelay - timeSince)
 }
 
-func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struct{}) {
+func (s *Spinner) painter(cancel, dataUpdate <-chan struct{}, done chan<- struct{}, delayUpdate <-chan time.Duration) {
 	timer := time.NewTimer(0)
 	var lastTick time.Time
 
@@ -378,10 +387,13 @@ func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struc
 		case <-timer.C:
 			lastTick = time.Now()
 
-			s.paintUpdate(timer)
+			s.paintUpdate(timer, false)
 
-		case <-delayUpdate:
-			handleDelayUpdate(atomicDuration(s.delayDuration), timer, lastTick)
+		case <-dataUpdate:
+			s.paintUpdate(timer, true)
+
+		case delayDuration := <-delayUpdate:
+			handleDelayUpdate(delayDuration, timer, lastTick)
 
 		case _, ok := <-cancel:
 			defer close(done)
@@ -396,7 +408,7 @@ func (s *Spinner) painter(cancel, delayUpdate <-chan struct{}, done chan<- struc
 	}
 }
 
-func (s *Spinner) paintUpdate(timer *time.Timer) {
+func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 	s.mu.Lock()
 
 	p := s.prefix
@@ -404,12 +416,26 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 	suf := s.suffix
 	mw := s.maxWidth
 	cFn := s.colorFn
-	c := s.chars[s.index]
+	d := s.delayDuration
+	index := s.index
 
-	s.index++
-	if s.index == len(s.chars) {
-		s.index = 0
+	if !dataUpdate {
+		s.index++
+
+		if s.index == len(s.chars) {
+			s.index = 0
+		}
+
+	} else {
+		// for data updates use the last spinner char
+		index--
+
+		if index < 0 {
+			index = len(s.chars) - 1
+		}
 	}
+
+	c := s.chars[index]
 
 	s.mu.Unlock()
 
@@ -441,7 +467,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer) {
 		s.lastPrintLen = n
 	}
 
-	timer.Reset(atomicDuration(s.delayDuration))
+	timer.Reset(d)
 }
 
 func (s *Spinner) paintStop(chanOk bool) {
@@ -567,11 +593,14 @@ func (s *Spinner) Delay(d time.Duration) error {
 		return errors.New("delay must be greater than 0")
 	}
 
-	atomic.StoreInt64(s.delayDuration, int64(d))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.delayDuration = d
 
 	// non-blocking notification
 	select {
-	case s.duCh <- struct{}{}:
+	case s.delayUpdateCh <- d:
 	default:
 	}
 
@@ -584,6 +613,8 @@ func (s *Spinner) Prefix(prefix string) {
 	defer s.mu.Unlock()
 
 	s.prefix = prefix
+
+	s.notifyDataChange()
 }
 
 // Suffix updates the Suffix after the spinner character. It's recommended that
@@ -593,6 +624,8 @@ func (s *Spinner) Suffix(suffix string) {
 	defer s.mu.Unlock()
 
 	s.suffix = suffix
+
+	s.notifyDataChange()
 }
 
 // Message updates the Message displayed after he suffix.
@@ -601,6 +634,8 @@ func (s *Spinner) Message(message string) {
 	defer s.mu.Unlock()
 
 	s.message = message
+
+	s.notifyDataChange()
 }
 
 // Colors updates the github.com/fatih/colors for printing the spinner line.
@@ -619,6 +654,8 @@ func (s *Spinner) Colors(colors ...string) error {
 
 	s.colorFn = colorFn
 
+	s.notifyDataChange()
+
 	return nil
 }
 
@@ -628,6 +665,8 @@ func (s *Spinner) StopMessage(message string) {
 	defer s.mu.Unlock()
 
 	s.stopMsg = message
+
+	s.notifyDataChange()
 }
 
 // StopColors updates the colors used for the stop message. See Colors() method
@@ -642,6 +681,8 @@ func (s *Spinner) StopColors(colors ...string) error {
 	defer s.mu.Unlock()
 
 	s.stopColorFn = colorFn
+
+	s.notifyDataChange()
 
 	return nil
 }
@@ -659,6 +700,8 @@ func (s *Spinner) StopCharacter(char string) {
 	if n > s.maxWidth {
 		s.maxWidth = n
 	}
+
+	s.notifyDataChange()
 }
 
 // StopFailMessage updates the Message used when StopFail() is called.
@@ -667,6 +710,8 @@ func (s *Spinner) StopFailMessage(message string) {
 	defer s.mu.Unlock()
 
 	s.stopFailMsg = message
+
+	s.notifyDataChange()
 }
 
 // StopFailColors updates the colors used for the StopFail message. See Colors() method
@@ -681,6 +726,8 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 	defer s.mu.Unlock()
 
 	s.stopFailColorFn = colorFn
+
+	s.notifyDataChange()
 
 	return nil
 }
@@ -698,6 +745,8 @@ func (s *Spinner) StopFailCharacter(char string) {
 	if n > s.maxWidth {
 		s.maxWidth = n
 	}
+
+	s.notifyDataChange()
 }
 
 // CharSet updates the set of characters (strings) to use for the spinner. You
@@ -743,5 +792,4 @@ func (s *Spinner) Reverse() {
 	s.index = 0
 }
 
-func int64Ptr(i int64) *int64    { return &i }
 func uint32Ptr(u uint32) *uint32 { return &u }

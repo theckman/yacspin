@@ -45,28 +45,6 @@ func testErrCheck(t *testing.T, name string, errContains string, err error) bool
 	return true
 }
 
-func Test_atomicDuration(t *testing.T) {
-	tests := []struct {
-		name  string
-		value *int64
-		want  time.Duration
-	}{
-		{
-			name:  "42",
-			value: int64Ptr(42),
-			want:  42,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := atomicDuration(tt.value); got != tt.want {
-				t.Fatalf("got = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -168,17 +146,12 @@ func TestNew(t *testing.T) {
 				t.Fatal("spinner.active is nil")
 			}
 
-			if spinner.duCh == nil {
-				t.Fatal("spinner.duCh is nil")
+			if spinner.delayUpdateCh == nil {
+				t.Fatal("spinner.delayUpdateCh is nil")
 			}
 
-			if spinner.delayDuration == nil {
-				t.Fatal("spinner.delayDuration is nil")
-			}
-
-			dd := atomicDuration(spinner.delayDuration)
-			if dd != tt.cfg.Delay {
-				t.Errorf("spinner.delayDuration = %s, want %s", dd, tt.cfg.Delay)
+			if spinner.delayDuration != tt.cfg.Delay {
+				t.Errorf("spinner.delayDuration = %s, want %s", spinner.delayDuration, tt.cfg.Delay)
 			}
 
 			if spinner.writer == nil {
@@ -373,27 +346,69 @@ func TestSpinner_Active(t *testing.T) {
 	}
 }
 
+func TestSpinner_notifyDataChange(t *testing.T) {
+	tests := []struct {
+		name          string
+		spinner       *Spinner
+		want          bool
+		shouldReceive bool
+	}{
+		{
+			name:          "buffered_channel",
+			spinner:       &Spinner{dataUpdateCh: make(chan struct{}, 1)},
+			want:          true,
+			shouldReceive: true,
+		},
+		{
+			name:          "unbuffered_channel",
+			spinner:       &Spinner{dataUpdateCh: make(chan struct{})},
+			shouldReceive: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.spinner.notifyDataChange()
+
+			select {
+			case _, got := <-tt.spinner.dataUpdateCh:
+				if !tt.shouldReceive {
+					t.Fatal("unexpected channel receive")
+				}
+
+				if got != tt.want {
+					t.Errorf("got = %t, want %t", got, tt.want)
+				}
+			default:
+				if tt.shouldReceive {
+					t.Fatal("nothing received over channel")
+				}
+			}
+		})
+	}
+}
+
 func TestSpinner_Delay(t *testing.T) {
 	tests := []struct {
 		name  string
 		input time.Duration
-		ch    chan struct{}
+		ch    chan time.Duration
 		err   string
 	}{
 		{
 			name: "invalid",
-			ch:   make(chan struct{}),
+			ch:   make(chan time.Duration, 1),
 			err:  "delay must be greater than 0",
 		},
 		{
 			name:  "assert_non-blocking",
 			input: 42,
-			ch:    make(chan struct{}),
+			ch:    make(chan time.Duration, 1),
 		},
 		{
 			name:  "assert_notification",
 			input: 42,
-			ch:    make(chan struct{}, 1),
+			ch:    make(chan time.Duration, 1),
 		},
 	}
 
@@ -402,8 +417,9 @@ func TestSpinner_Delay(t *testing.T) {
 			defer close(tt.ch)
 
 			spinner := &Spinner{
-				delayDuration: int64Ptr(0),
-				duCh:          tt.ch,
+				mu:            &sync.Mutex{},
+				delayDuration: 0,
+				delayUpdateCh: tt.ch,
 			}
 
 			tmr := time.NewTimer(2 * time.Second)
@@ -429,14 +445,19 @@ func TestSpinner_Delay(t *testing.T) {
 
 			if cap(tt.ch) == 1 {
 				select {
-				case <-tt.ch:
-					// success
+				case got, ok := <-tt.ch:
+					if !ok {
+						t.Fatal("channel closed")
+					}
+					if got != tt.input {
+						t.Errorf("channel receive got = %s, want %s", got, tt.input)
+					}
 				default:
 					t.Fatal("notification channel had no messages")
 				}
 			}
 
-			got := time.Duration(atomic.LoadInt64(spinner.delayDuration))
+			got := spinner.delayDuration
 			if got != tt.input {
 				t.Errorf("got = %s, want %s", got, tt.input)
 			}
@@ -707,7 +728,7 @@ func TestSpinner_Start(t *testing.T) {
 			spinner: &Spinner{
 				active:          uint32Ptr(2),
 				mu:              &sync.Mutex{},
-				delayDuration:   int64Ptr(int64(time.Millisecond)),
+				delayDuration:   time.Millisecond,
 				colorFn:         fmt.Sprintf,
 				stopColorFn:     fmt.Sprintf,
 				stopFailColorFn: fmt.Sprintf,
@@ -719,7 +740,7 @@ func TestSpinner_Start(t *testing.T) {
 			spinner: &Spinner{
 				active:          uint32Ptr(0),
 				mu:              &sync.Mutex{},
-				delayDuration:   int64Ptr(int64(time.Millisecond)),
+				delayDuration:   time.Millisecond,
 				colorFn:         fmt.Sprintf,
 				stopColorFn:     fmt.Sprintf,
 				stopFailColorFn: fmt.Sprintf,
@@ -908,9 +929,9 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				maxWidth:      1,
 				colorFn:       fmt.Sprintf,
 				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration: int64Ptr(10),
+				delayDuration: 10,
 			},
-			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\ray msg",
+			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
 		{
 			name: "spinner_no_hide_cursor_auto_cursor",
@@ -922,10 +943,10 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				maxWidth:        1,
 				colorFn:         fmt.Sprintf,
 				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration:   int64Ptr(10),
+				delayDuration:   10,
 				suffixAutoColon: true,
 			},
-			want: "\r\033[K\ray : msg\r\033[K\raz : msg\r\033[K\ray : msg",
+			want: "\r\033[K\ray : msg\r\033[K\raz : msg\r\033[K\raz : msg\r\033[K\ray : msg",
 		},
 		{
 			name: "spinner_hide_cursor",
@@ -938,9 +959,9 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				maxWidth:      1,
 				colorFn:       fmt.Sprintf,
 				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration: int64Ptr(10),
+				delayDuration: 10,
 			},
-			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
+			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
 		},
 		{
 			name: "spinner_hide_cursor_windows",
@@ -953,10 +974,10 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				maxWidth:      1,
 				colorFn:       fmt.Sprintf,
 				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration: int64Ptr(10),
+				delayDuration: 10,
 				isDumbTerm:    true,
 			},
-			want: "\r\ray msg\r      \raz msg\r      \ray msg",
+			want: "\r\ray msg\r      \raz msg\r      \raz msg\r      \ray msg",
 		},
 		{
 			name: "spinner_empty_print",
@@ -965,9 +986,9 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				maxWidth:      0,
 				colorFn:       fmt.Sprintf,
 				chars:         []character{{Value: "", Size: 0}},
-				delayDuration: int64Ptr(10),
+				delayDuration: 10,
 			},
-			want: "\r\033[K\r\r\033[K\r\r\033[K\r",
+			want: "\r\033[K\r\r\033[K\r\r\033[K\r\r\033[K\r",
 		},
 	}
 
@@ -978,9 +999,10 @@ func TestSpinner_paintUpdate(t *testing.T) {
 
 			tm := time.NewTimer(10 * time.Millisecond)
 
-			tt.spinner.paintUpdate(tm)
-			tt.spinner.paintUpdate(tm)
-			tt.spinner.paintUpdate(tm)
+			tt.spinner.paintUpdate(tm, false)
+			tt.spinner.paintUpdate(tm, false)
+			tt.spinner.paintUpdate(tm, true)
+			tt.spinner.paintUpdate(tm, false)
 			tm.Stop()
 
 			got := buf.String()
@@ -1234,9 +1256,12 @@ func Test_setToCharSlice(t *testing.T) {
 }
 
 func TestSpinner_painter(t *testing.T) {
-	const want = "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\ray msg\r\x1b[K\rav stop\n"
+	const want = "\r\033[K\ray msg\r\033[K\ray othermsg\r\033[K\raz msg\r\033[K\ray msg\r\x1b[K\rav stop\n"
 
 	buf := &bytes.Buffer{}
+
+	cancel, done, dataUpdate := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	delayUpdate := make(chan time.Duration, 1)
 
 	spinner := &Spinner{
 		mu:            &sync.Mutex{},
@@ -1250,17 +1275,33 @@ func TestSpinner_painter(t *testing.T) {
 		stopColorFn:   fmt.Sprintf,
 		stopMsg:       "stop",
 		stopChar:      character{Value: "v", Size: 1},
-		delayDuration: int64Ptr(int64(20 * time.Millisecond)),
+		delayDuration: 20 * time.Millisecond,
+		cancelCh:      cancel,
+		doneCh:        done,
+		dataUpdateCh:  dataUpdate,
+		delayUpdateCh: delayUpdate,
 	}
 
-	cancel, delayUpdate, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go spinner.painter(cancel, dataUpdate, done, delayUpdate)
 
-	go spinner.painter(cancel, delayUpdate, done)
+	time.Sleep(3 * time.Millisecond)
 
-	time.Sleep(4 * time.Millisecond)
+	spinner.mu.Lock()
 
-	atomic.StoreInt64(spinner.delayDuration, int64(5*time.Millisecond))
-	delayUpdate <- struct{}{}
+	spinner.message = "othermsg"
+	spinner.dataUpdateCh <- struct{}{}
+
+	spinner.mu.Unlock()
+
+	time.Sleep(time.Millisecond)
+
+	spinner.mu.Lock()
+
+	spinner.message = "msg"
+	spinner.delayDuration = 5 * time.Millisecond
+	delayUpdate <- 5 * time.Millisecond
+
+	spinner.mu.Unlock()
 
 	time.Sleep(8 * time.Millisecond)
 

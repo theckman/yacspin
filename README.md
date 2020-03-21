@@ -26,7 +26,7 @@ cfg := yacspin.Config{
 	Delay:           100 * time.Millisecond,
 	CharSet:         yacspin.CharSets[59],
 	Suffix:          " backing up database to S3",
-    SuffixAutoColon: true,
+	SuffixAutoColon: true,
 	Message:         "exporting data",
 	StopCharacter:   "✓",
 	StopColors:      []string{"fgGreen"},
