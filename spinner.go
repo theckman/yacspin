@@ -287,9 +287,13 @@ func (s *Spinner) Start() error {
 
 	// we now have atomic guarantees of no other threads starting or running
 
+	s.mu.Lock()
+
 	s.doneCh = make(chan struct{})
 	s.delayUpdateCh = make(chan time.Duration, 1)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
+
+	s.mu.Unlock()
 
 	go s.painter(s.cancelCh, s.dataUpdateCh, s.doneCh, s.delayUpdateCh)
 
@@ -335,12 +339,16 @@ func (s *Spinner) stop(fail bool) error {
 	// wait for the painter to stop
 	<-s.doneCh
 
+	s.mu.Lock()
+
 	s.index = 0
 	s.cancelCh = nil
 	s.doneCh = nil
 
 	s.dataUpdateCh = make(chan struct{})       // prevent panic() in various setter methods
 	s.delayUpdateCh = make(chan time.Duration) // prevent panic() in .Delay()
+
+	s.mu.Unlock()
 
 	// move us to the stopped state
 	a = atomic.CompareAndSwapUint32(s.active, 3, 0)
@@ -467,7 +475,9 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 		s.lastPrintLen = n
 	}
 
-	timer.Reset(d)
+	if !dataUpdate {
+		timer.Reset(d)
+	}
 }
 
 func (s *Spinner) paintStop(chanOk bool) {
