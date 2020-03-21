@@ -788,6 +788,7 @@ func TestSpinner_Stop(t *testing.T) {
 		{
 			name: "not_running",
 			spinner: &Spinner{
+				mu:       &sync.Mutex{},
 				active:   uint32Ptr(0),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
@@ -797,6 +798,7 @@ func TestSpinner_Stop(t *testing.T) {
 		{
 			name: "not_running",
 			spinner: &Spinner{
+				mu:       &sync.Mutex{},
 				active:   uint32Ptr(2),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
@@ -855,6 +857,7 @@ func TestSpinner_StopFail(t *testing.T) {
 		{
 			name: "not_running",
 			spinner: &Spinner{
+				mu:       &sync.Mutex{},
 				active:   uint32Ptr(0),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
@@ -864,6 +867,7 @@ func TestSpinner_StopFail(t *testing.T) {
 		{
 			name: "not_running",
 			spinner: &Spinner{
+				mu:       &sync.Mutex{},
 				active:   uint32Ptr(2),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
