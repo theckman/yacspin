@@ -367,12 +367,13 @@ func (s *Spinner) Start() error {
 
 	s.mu.Lock()
 
-	s.doneCh = make(chan struct{})
-	s.pauseCh = make(chan struct{}) // unbuffered since we want this to be synchronous
 	s.delayUpdateCh = make(chan time.Duration, 1)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
 
 	s.mu.Unlock()
+
+	s.doneCh = make(chan struct{})
+	s.pauseCh = make(chan struct{}) // unbuffered since we want this to be synchronous
 
 	go s.painter(s.cancelCh, s.dataUpdateCh, s.pauseCh, s.doneCh, s.delayUpdateCh)
 
@@ -475,14 +476,15 @@ func (s *Spinner) stop(fail bool) error {
 
 	s.mu.Lock()
 
-	s.index = 0
-	s.cancelCh = nil
-	s.doneCh = nil
-
 	s.dataUpdateCh = make(chan struct{})       // prevent panic() in various setter methods
 	s.delayUpdateCh = make(chan time.Duration) // prevent panic() in .Delay()
 
 	s.mu.Unlock()
+
+	s.index = 0
+	s.cancelCh = nil
+	s.doneCh = nil
+	s.pauseCh = nil
 
 	// move us to the stopped state
 	a = atomic.CompareAndSwapUint32(s.status, statusStopping, statusStopped)
