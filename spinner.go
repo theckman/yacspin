@@ -160,13 +160,15 @@ type Spinner struct {
 	suffixAutoColon bool
 	isDumbTerm      bool
 
-	active        *uint32
-	lastPrintLen  int
-	cancelCh      chan struct{} // send: Stop(), close: StopFail(); both stop painter
-	delayUpdateCh chan time.Duration
-	dataUpdateCh  chan struct{}
-	doneCh        chan struct{}
+	status       *uint32
+	lastPrintLen int
+	cancelCh     chan struct{} // send: Stop(), close: StopFail(); both stop painter
+	doneCh       chan struct{}
+	pauseCh      chan struct{}
+	unpauseCh    chan struct{}
+	unpausedCh   chan struct{}
 
+	// mutex hat and the fields wearing it
 	mu              *sync.Mutex
 	delayDuration   time.Duration
 	chars           []character
@@ -182,7 +184,19 @@ type Spinner struct {
 	stopFailMsg     string
 	stopFailChar    character
 	stopFailColorFn func(format string, a ...interface{}) string
+	delayUpdateCh   chan time.Duration
+	dataUpdateCh    chan struct{}
 }
+
+const (
+	statusStopped uint32 = iota
+	statusStarting
+	statusRunning
+	statusStopping
+	statusPausing
+	statusPaused
+	statusUnpausing
+)
 
 // New creates a new unstarted spinner.
 func New(cfg Config) (*Spinner, error) {
@@ -193,7 +207,7 @@ func New(cfg Config) (*Spinner, error) {
 	s := &Spinner{
 		mu:            &sync.Mutex{},
 		delayDuration: cfg.Delay,
-		active:        uint32Ptr(0),
+		status:        uint32Ptr(0),
 		delayUpdateCh: make(chan time.Duration),
 		dataUpdateCh:  make(chan struct{}),
 
@@ -270,18 +284,82 @@ func (s *Spinner) notifyDataChange() {
 	}
 }
 
+// Active is deprecated and will be removed in a future release. It was replaced
+// by the Status() method.
+//
 // Active returns whether the spinner is active. Active means the spinner is
 // either starting or running.
 func (s *Spinner) Active() bool {
-	v := atomic.LoadUint32(s.active)
+	v := atomic.LoadUint32(s.status)
 	return v == 1 || v == 2
+}
+
+// SpinnerStatus describes the status of the spinner. See the possible constant
+// values.
+type SpinnerStatus uint32
+
+const (
+	// SpinnerStopped is a stopped spinner
+	SpinnerStopped SpinnerStatus = iota
+
+	// SpinnerStarting is a starting spinner
+	SpinnerStarting
+
+	// SpinnerRunning is a running spinner
+	SpinnerRunning
+
+	// SpinnerStopping is a stopping spinner
+	SpinnerStopping
+
+	// SpinnerPausing is a pausing spinner
+	SpinnerPausing
+
+	// SpinnerPaused is a paused spinner
+	SpinnerPaused
+
+	// SpinnerUnpausing is a unpausing spinner
+	SpinnerUnpausing
+)
+
+func (s SpinnerStatus) String() string {
+	switch s {
+	case SpinnerStopped:
+		return "stopped"
+	case SpinnerStarting:
+		return "starting"
+	case SpinnerRunning:
+		return "running"
+	case SpinnerStopping:
+		return "stopping"
+	case SpinnerPausing:
+		return "pausing"
+	case SpinnerPaused:
+		return "paused"
+	case SpinnerUnpausing:
+		return "unpausing"
+	default:
+		return fmt.Sprintf("unknown (%d)", s)
+	}
+}
+
+// Status returns the current status of the internal state machine. Returned
+// value is of type SpinnerStatus which has package constants available.
+func (s *Spinner) Status() SpinnerStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.status == nil {
+		panic("status field is nil")
+	}
+
+	return SpinnerStatus(atomic.LoadUint32(s.status))
 }
 
 // Start begins the spinner on the Writer in the Config provided to New(). Onnly
 // possible error is if the spinner is already runninng.
 func (s *Spinner) Start() error {
 	// move us to the starting state
-	if !atomic.CompareAndSwapUint32(s.active, 0, 1) {
+	if !atomic.CompareAndSwapUint32(s.status, statusStopped, statusStarting) {
 		return errors.New("spinner already running or shutting down")
 	}
 
@@ -290,16 +368,72 @@ func (s *Spinner) Start() error {
 	s.mu.Lock()
 
 	s.doneCh = make(chan struct{})
+	s.pauseCh = make(chan struct{}) // unbuffered since we want this to be synchronous
 	s.delayUpdateCh = make(chan time.Duration, 1)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
 
 	s.mu.Unlock()
 
-	go s.painter(s.cancelCh, s.dataUpdateCh, s.doneCh, s.delayUpdateCh)
+	go s.painter(s.cancelCh, s.dataUpdateCh, s.pauseCh, s.doneCh, s.delayUpdateCh)
 
 	// move us to the running state
-	if !atomic.CompareAndSwapUint32(s.active, 1, 2) {
-		panic("atomic invariant detected")
+	if !atomic.CompareAndSwapUint32(s.status, statusStarting, statusRunning) {
+		panic("atomic invariant encountered")
+	}
+
+	return nil
+}
+
+// Pause puts the spinner in a state where it no longer animates or renders
+// updates to data. This function blocks until the spinner's internal goroutine
+// enters a paused state.
+//
+// If you want to make a few configuration changes and have them to appear at
+// the same time, like changing the suffix, message, and color, you can Pause()
+// the spinner first and then Unpause() after making the changes.
+//
+// If the spinner is not running (stopped, paused, or in transition to another
+// state) this returns an error.
+func (s *Spinner) Pause() error {
+	if !atomic.CompareAndSwapUint32(s.status, statusRunning, statusPausing) {
+		return errors.New("spinner not running")
+	}
+
+	// set up the channels the painter will use
+	s.unpauseCh, s.unpausedCh = make(chan struct{}), make(chan struct{})
+
+	// inform the painter to pause
+	s.pauseCh <- struct{}{}
+
+	if !atomic.CompareAndSwapUint32(s.status, statusPausing, statusPaused) {
+		panic("atomic invariant encountered")
+	}
+
+	return nil
+}
+
+// Unpause returns the spinner back to a running state after pausing. See
+// Pause() documentation for more detail. This function blocks until the
+// spinner's internal goroutine acknowledges the request to unpause.
+//
+// If the spinner is not paused this returns an error.
+func (s *Spinner) Unpause() error {
+	if !atomic.CompareAndSwapUint32(s.status, statusPaused, statusUnpausing) {
+		return errors.New("spinner not paused")
+	}
+
+	// tell the painter to unpause
+	close(s.unpauseCh)
+
+	// wait for the painter to signal it will continue
+	<-s.unpausedCh
+
+	// clear the no longer needed channels
+	s.unpauseCh = nil
+	s.unpausedCh = nil
+
+	if !atomic.CompareAndSwapUint32(s.status, statusUnpausing, statusRunning) {
+		panic("atomic invariant encountered")
 	}
 
 	return nil
@@ -321,7 +455,7 @@ func (s *Spinner) StopFail() error {
 
 func (s *Spinner) stop(fail bool) error {
 	// move us to a stopping state to protect against concurrent Stop() calls
-	a := atomic.CompareAndSwapUint32(s.active, 2, 3)
+	a := atomic.CompareAndSwapUint32(s.status, statusRunning, statusStopping)
 	if !a {
 		return errors.New("spinner not running or shutting down")
 	}
@@ -351,7 +485,7 @@ func (s *Spinner) stop(fail bool) error {
 	s.mu.Unlock()
 
 	// move us to the stopped state
-	a = atomic.CompareAndSwapUint32(s.active, 3, 0)
+	a = atomic.CompareAndSwapUint32(s.status, statusStopping, statusStopped)
 	if !a {
 		panic("atomic invariant encountered")
 	}
@@ -386,7 +520,7 @@ func handleDelayUpdate(newDelay time.Duration, timer *time.Timer, lastTick time.
 	timer.Reset(newDelay - timeSince)
 }
 
-func (s *Spinner) painter(cancel, dataUpdate <-chan struct{}, done chan<- struct{}, delayUpdate <-chan time.Duration) {
+func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<- struct{}, delayUpdate <-chan time.Duration) {
 	timer := time.NewTimer(0)
 	var lastTick time.Time
 
@@ -396,6 +530,10 @@ func (s *Spinner) painter(cancel, dataUpdate <-chan struct{}, done chan<- struct
 			lastTick = time.Now()
 
 			s.paintUpdate(timer, false)
+
+		case <-pause:
+			<-s.unpauseCh
+			close(s.unpausedCh)
 
 		case <-dataUpdate:
 			s.paintUpdate(timer, true)
