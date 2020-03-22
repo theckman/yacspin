@@ -142,8 +142,8 @@ func TestNew(t *testing.T) {
 				t.Fatal("spinner.mu is nil")
 			}
 
-			if spinner.active == nil {
-				t.Fatal("spinner.active is nil")
+			if spinner.status == nil {
+				t.Fatal("spinner.status is nil")
 			}
 
 			if spinner.delayUpdateCh == nil {
@@ -306,7 +306,7 @@ func TestNew_dumbTerm(t *testing.T) {
 }
 
 func TestSpinner_Active(t *testing.T) {
-	spinner := &Spinner{active: uint32Ptr(0)}
+	spinner := &Spinner{status: uint32Ptr(0)}
 
 	tests := []struct {
 		name  string
@@ -337,10 +337,64 @@ func TestSpinner_Active(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			atomic.StoreUint32(spinner.active, tt.input)
+			atomic.StoreUint32(spinner.status, tt.input)
 
 			if got := spinner.Active(); got != tt.want {
 				t.Errorf("got = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSpinner_Status(t *testing.T) {
+	tests := []struct {
+		name        string
+		spinner     *Spinner
+		shouldPanic bool
+		want        SpinnerStatus
+	}{
+		{
+			name:        "should_panic",
+			spinner:     &Spinner{mu: &sync.Mutex{}},
+			shouldPanic: true,
+		},
+		{
+			name: "active_status",
+			spinner: &Spinner{
+				mu:     &sync.Mutex{},
+				status: uint32Ptr(statusUnpausing),
+			},
+			want: SpinnerUnpausing,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			var got SpinnerStatus
+
+			panicked := func() (p bool) {
+				defer func() {
+					if r := recover(); r != nil {
+						p = true
+					}
+				}()
+
+				got = tt.spinner.Status()
+
+				return false
+			}()
+
+			if panicked != tt.shouldPanic {
+				t.Fatalf("panicked = %t, want %t", panicked, tt.shouldPanic)
+			}
+
+			if tt.shouldPanic {
+				return
+			}
+
+			if got != tt.want {
+				t.Fatalf("got = %d, want = %d", got, tt.want)
 			}
 		})
 	}
@@ -726,7 +780,7 @@ func TestSpinner_Start(t *testing.T) {
 		{
 			name: "running_spinner",
 			spinner: &Spinner{
-				active:          uint32Ptr(2),
+				status:          uint32Ptr(2),
 				mu:              &sync.Mutex{},
 				delayDuration:   time.Millisecond,
 				colorFn:         fmt.Sprintf,
@@ -738,7 +792,7 @@ func TestSpinner_Start(t *testing.T) {
 		{
 			name: "spinner",
 			spinner: &Spinner{
-				active:          uint32Ptr(0),
+				status:          uint32Ptr(0),
 				mu:              &sync.Mutex{},
 				delayDuration:   time.Millisecond,
 				colorFn:         fmt.Sprintf,
@@ -779,6 +833,117 @@ func TestSpinner_Start(t *testing.T) {
 	}
 }
 
+func TestSpinner_Pause(t *testing.T) {
+	tests := []struct {
+		name    string
+		spinner *Spinner
+		err     string
+	}{
+		{
+			name: "not_running",
+			spinner: &Spinner{
+				status:  uint32Ptr(0),
+				pauseCh: make(chan struct{}, 1),
+			},
+			err: "spinner not running",
+		},
+		{
+			name: "running",
+			spinner: &Spinner{
+				status:  uint32Ptr(statusRunning),
+				pauseCh: make(chan struct{}, 1),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if cont := testErrCheck(t, "Pause()", tt.err, tt.spinner.Pause()); !cont {
+				return
+			}
+
+			if tt.spinner.unpauseCh == nil {
+				t.Fatal("unpauseCh = nil")
+			}
+
+			if tt.spinner.unpausedCh == nil {
+				t.Fatal("unpausedCh = nil")
+			}
+
+			select {
+			case _, ok := <-tt.spinner.pauseCh:
+				if !ok {
+					t.Fatal("unexpected closed channel")
+				}
+			default:
+				t.Fatal("expected message from pauseCh")
+			}
+
+			if s := atomic.LoadUint32(tt.spinner.status); s != statusPaused {
+				t.Fatalf("status = %d, want %d", s, statusPaused)
+			}
+		})
+	}
+}
+
+func TestSpinner_Unpause(t *testing.T) {
+	tests := []struct {
+		name    string
+		spinner *Spinner
+		err     string
+	}{
+		{
+			name: "not_paused",
+			spinner: &Spinner{
+				status:     uint32Ptr(0),
+				unpauseCh:  make(chan struct{}),
+				unpausedCh: make(chan struct{}),
+			},
+			err: "spinner not paused",
+		},
+		{
+			name: "running",
+			spinner: &Spinner{
+				status:     uint32Ptr(statusPaused),
+				unpauseCh:  make(chan struct{}),
+				unpausedCh: make(chan struct{}),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := tt.spinner.unpauseCh
+			close(tt.spinner.unpausedCh)
+
+			if cont := testErrCheck(t, "Unpause()", tt.err, tt.spinner.Unpause()); !cont {
+				return
+			}
+
+			if tt.spinner.unpauseCh != nil {
+				t.Fatal("unpauseCh != nil")
+			}
+
+			if tt.spinner.unpausedCh != nil {
+				t.Fatal("unpausedCh != nil")
+			}
+
+			select {
+			case _, ok := <-ch:
+				if ok {
+					t.Fatal("unexpected open channel")
+				}
+			default:
+				t.Fatal("expected unpauseCh closed")
+			}
+
+			if s := atomic.LoadUint32(tt.spinner.status); s != statusRunning {
+				t.Fatalf("status = %d, want %d", s, statusRunning)
+			}
+		})
+	}
+}
+
 func TestSpinner_Stop(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -789,7 +954,7 @@ func TestSpinner_Stop(t *testing.T) {
 			name: "not_running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				active:   uint32Ptr(0),
+				status:   uint32Ptr(0),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
@@ -799,7 +964,7 @@ func TestSpinner_Stop(t *testing.T) {
 			name: "not_running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				active:   uint32Ptr(2),
+				status:   uint32Ptr(2),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
@@ -840,7 +1005,7 @@ func TestSpinner_Stop(t *testing.T) {
 				t.Error("tt.spinner.doneCh is not nil")
 			}
 
-			status := atomic.LoadUint32(tt.spinner.active)
+			status := atomic.LoadUint32(tt.spinner.status)
 			if status != 0 {
 				t.Errorf("tt.spinner.status = %d, want 0", status)
 			}
@@ -858,7 +1023,7 @@ func TestSpinner_StopFail(t *testing.T) {
 			name: "not_running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				active:   uint32Ptr(0),
+				status:   uint32Ptr(0),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
@@ -868,7 +1033,7 @@ func TestSpinner_StopFail(t *testing.T) {
 			name: "not_running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				active:   uint32Ptr(2),
+				status:   uint32Ptr(2),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
@@ -909,7 +1074,7 @@ func TestSpinner_StopFail(t *testing.T) {
 				t.Error("tt.spinner.doneCh is not nil")
 			}
 
-			status := atomic.LoadUint32(tt.spinner.active)
+			status := atomic.LoadUint32(tt.spinner.status)
 			if status != 0 {
 				t.Errorf("tt.spinner.status = %d, want 0", status)
 			}
@@ -1126,6 +1291,18 @@ func TestSpinner_paintStop(t *testing.T) {
 			want: "\r\033[K\r",
 		},
 		{
+			name: "fail_no_char_no_msg_dumb_term",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				isDumbTerm:      true,
+				stopFailColorFn: fmt.Sprintf,
+			},
+			want: "\r\r",
+		},
+		{
 			name: "fail_colorall",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
@@ -1264,7 +1441,7 @@ func TestSpinner_painter(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 
-	cancel, done, dataUpdate := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	cancel, done, dataUpdate, pause := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 	delayUpdate := make(chan time.Duration, 1)
 
 	spinner := &Spinner{
@@ -1286,7 +1463,7 @@ func TestSpinner_painter(t *testing.T) {
 		delayUpdateCh: delayUpdate,
 	}
 
-	go spinner.painter(cancel, dataUpdate, done, delayUpdate)
+	go spinner.painter(cancel, dataUpdate, pause, done, delayUpdate)
 
 	time.Sleep(3 * time.Millisecond)
 
@@ -1298,6 +1475,19 @@ func TestSpinner_painter(t *testing.T) {
 	spinner.mu.Unlock()
 
 	time.Sleep(time.Millisecond)
+
+	spinner.unpauseCh, spinner.unpausedCh = make(chan struct{}), make(chan struct{})
+	pause <- struct{}{}
+
+	close(spinner.unpauseCh)
+	_, ok := <-spinner.unpausedCh
+
+	if ok {
+		t.Fatal("unexpected successful channel receive")
+	}
+
+	spinner.unpauseCh = nil
+	spinner.unpausedCh = nil
 
 	spinner.mu.Lock()
 
@@ -1317,5 +1507,62 @@ func TestSpinner_painter(t *testing.T) {
 
 	if got != want {
 		t.Fatalf("got = %#v, want %#v", got, want)
+	}
+}
+
+func TestSpinnerStatus_String(t *testing.T) {
+	tests := []struct {
+		name string
+		ss   SpinnerStatus
+		want string
+	}{
+		{
+			name: "stopped",
+			ss:   SpinnerStopped,
+			want: "stopped",
+		},
+		{
+			name: "starting",
+			ss:   SpinnerStarting,
+			want: "starting",
+		},
+		{
+			name: "running",
+			ss:   SpinnerRunning,
+			want: "running",
+		},
+		{
+			name: "stopping",
+			ss:   SpinnerStopping,
+			want: "stopping",
+		},
+		{
+			name: "pausing",
+			ss:   SpinnerPausing,
+			want: "pausing",
+		},
+		{
+			name: "paused",
+			ss:   SpinnerPaused,
+			want: "paused",
+		},
+		{
+			name: "unpausing",
+			ss:   SpinnerUnpausing,
+			want: "unpausing",
+		},
+		{
+			name: "unknown",
+			ss:   42,
+			want: "unknown (42)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ss.String(); got != tt.want {
+				t.Errorf("got = %#v, got %#v", got, tt.want)
+			}
+		})
 	}
 }
