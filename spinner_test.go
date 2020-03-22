@@ -306,7 +306,7 @@ func TestNew_dumbTerm(t *testing.T) {
 }
 
 func TestSpinner_Active(t *testing.T) {
-	spinner := &Spinner{status: uint32Ptr(0)}
+	spinner := &Spinner{status: uint32Ptr(statusStopped)}
 
 	tests := []struct {
 		name  string
@@ -314,23 +314,23 @@ func TestSpinner_Active(t *testing.T) {
 		want  bool
 	}{
 		{
-			name:  "0",
-			input: 0,
+			name:  "stopped",
+			input: statusStopped,
 			want:  false,
 		},
 		{
-			name:  "1",
-			input: 1,
+			name:  "starting",
+			input: statusStarting,
 			want:  true,
 		},
 		{
-			name:  "2",
-			input: 2,
+			name:  "running",
+			input: statusRunning,
 			want:  true,
 		},
 		{
-			name:  "3",
-			input: 3,
+			name:  "stopping",
+			input: statusStopping,
 			want:  false,
 		},
 	}
@@ -780,7 +780,7 @@ func TestSpinner_Start(t *testing.T) {
 		{
 			name: "running_spinner",
 			spinner: &Spinner{
-				status:          uint32Ptr(2),
+				status:          uint32Ptr(statusRunning),
 				mu:              &sync.Mutex{},
 				delayDuration:   time.Millisecond,
 				colorFn:         fmt.Sprintf,
@@ -792,7 +792,7 @@ func TestSpinner_Start(t *testing.T) {
 		{
 			name: "spinner",
 			spinner: &Spinner{
-				status:          uint32Ptr(0),
+				status:          uint32Ptr(statusStopped),
 				mu:              &sync.Mutex{},
 				delayDuration:   time.Millisecond,
 				colorFn:         fmt.Sprintf,
@@ -842,7 +842,7 @@ func TestSpinner_Pause(t *testing.T) {
 		{
 			name: "not_running",
 			spinner: &Spinner{
-				status:  uint32Ptr(0),
+				status:  uint32Ptr(statusStopped),
 				pauseCh: make(chan struct{}, 1),
 			},
 			err: "spinner not running",
@@ -895,7 +895,7 @@ func TestSpinner_Unpause(t *testing.T) {
 		{
 			name: "not_paused",
 			spinner: &Spinner{
-				status:     uint32Ptr(0),
+				status:     uint32Ptr(statusStopped),
 				unpauseCh:  make(chan struct{}),
 				unpausedCh: make(chan struct{}),
 			},
@@ -954,7 +954,7 @@ func TestSpinner_Stop(t *testing.T) {
 			name: "not_running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				status:   uint32Ptr(0),
+				status:   uint32Ptr(statusStopped),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
@@ -1038,17 +1038,17 @@ func TestSpinner_StopFail(t *testing.T) {
 			name: "not_running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				status:   uint32Ptr(0),
+				status:   uint32Ptr(statusStopped),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
 			err: "spinner not running or paused",
 		},
 		{
-			name: "not_running",
+			name: "running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				status:   uint32Ptr(2),
+				status:   uint32Ptr(statusRunning),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
