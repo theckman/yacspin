@@ -11,7 +11,7 @@
 // list of known colors in the yacspin.ValidColors variable.
 //
 //		cfg := yacspin.Config{
-//			Delay:         100 * time.Millisecond,
+//			Frequency:     100 * time.Millisecond,
 //			CharSet:       yacspin.CharSets[59],
 //			Suffix:        " backing up database to S3",
 //			Message:       "exporting data",
@@ -79,10 +79,14 @@ func setToCharSlice(ss []string) ([]character, int) {
 
 // Config is the configuration structure for the Spinner.
 type Config struct {
-	// Delay specifies how long to way between repainting the line. Optimal
-	// value depends on the character set you use.
+	// Frequency specifies how often to animate the spinner. Optimal value
+	// depends on the character set you use.
 	//
 	// Note: This is a required value (cannot be 0)
+	Frequency time.Duration
+
+	// Delay is deprecated by the Frequency configuration field, with Frequency
+	// taking precedent if both are present.
 	Delay time.Duration
 
 	// Writer is the place where we are outputting the spinner, and can't be
@@ -169,23 +173,23 @@ type Spinner struct {
 	unpausedCh   chan struct{}
 
 	// mutex hat and the fields wearing it
-	mu              *sync.Mutex
-	delayDuration   time.Duration
-	chars           []character
-	maxWidth        int
-	index           int
-	prefix          string
-	suffix          string
-	message         string
-	colorFn         func(format string, a ...interface{}) string
-	stopMsg         string
-	stopChar        character
-	stopColorFn     func(format string, a ...interface{}) string
-	stopFailMsg     string
-	stopFailChar    character
-	stopFailColorFn func(format string, a ...interface{}) string
-	delayUpdateCh   chan time.Duration
-	dataUpdateCh    chan struct{}
+	mu                *sync.Mutex
+	frequency         time.Duration
+	chars             []character
+	maxWidth          int
+	index             int
+	prefix            string
+	suffix            string
+	message           string
+	colorFn           func(format string, a ...interface{}) string
+	stopMsg           string
+	stopChar          character
+	stopColorFn       func(format string, a ...interface{}) string
+	stopFailMsg       string
+	stopFailChar      character
+	stopFailColorFn   func(format string, a ...interface{}) string
+	frequencyUpdateCh chan time.Duration
+	dataUpdateCh      chan struct{}
 }
 
 const (
@@ -200,16 +204,20 @@ const (
 
 // New creates a new unstarted spinner.
 func New(cfg Config) (*Spinner, error) {
-	if cfg.Delay < 1 {
-		return nil, errors.New("cfg.Delay must be greater than 0")
+	if cfg.Delay > 0 && cfg.Frequency == 0 {
+		cfg.Frequency = cfg.Delay
+	}
+
+	if cfg.Frequency < 1 {
+		return nil, errors.New("cfg.Frequency must be greater than 0")
 	}
 
 	s := &Spinner{
-		mu:            &sync.Mutex{},
-		delayDuration: cfg.Delay,
-		status:        uint32Ptr(0),
-		delayUpdateCh: make(chan time.Duration),
-		dataUpdateCh:  make(chan struct{}),
+		mu:                &sync.Mutex{},
+		frequency:         cfg.Frequency,
+		status:            uint32Ptr(0),
+		frequencyUpdateCh: make(chan time.Duration),
+		dataUpdateCh:      make(chan struct{}),
 
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
@@ -367,7 +375,7 @@ func (s *Spinner) Start() error {
 
 	s.mu.Lock()
 
-	s.delayUpdateCh = make(chan time.Duration, 1)
+	s.frequencyUpdateCh = make(chan time.Duration, 1)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
 
 	s.mu.Unlock()
@@ -375,7 +383,7 @@ func (s *Spinner) Start() error {
 	s.doneCh = make(chan struct{})
 	s.pauseCh = make(chan struct{}) // unbuffered since we want this to be synchronous
 
-	go s.painter(s.cancelCh, s.dataUpdateCh, s.pauseCh, s.doneCh, s.delayUpdateCh)
+	go s.painter(s.cancelCh, s.dataUpdateCh, s.pauseCh, s.doneCh, s.frequencyUpdateCh)
 
 	// move us to the running state
 	if !atomic.CompareAndSwapUint32(s.status, statusStarting, statusRunning) {
@@ -486,8 +494,8 @@ func (s *Spinner) stop(fail bool) error {
 
 	s.mu.Lock()
 
-	s.dataUpdateCh = make(chan struct{})       // prevent panic() in various setter methods
-	s.delayUpdateCh = make(chan time.Duration) // prevent panic() in .Delay()
+	s.dataUpdateCh = make(chan struct{})           // prevent panic() in various setter methods
+	s.frequencyUpdateCh = make(chan time.Duration) // prevent panic() in .Frequency()
 
 	s.mu.Unlock()
 
@@ -504,10 +512,10 @@ func (s *Spinner) stop(fail bool) error {
 	return nil
 }
 
-// handleDelayUpdate is for when the delay duration was changed. This tries to
+// handleFrequencyUpdate is for when the frequency was changed. This tries to
 // see if we should fire the timer now, or change its current duration to match
 // the new duration.
-func handleDelayUpdate(newDelay time.Duration, timer *time.Timer, lastTick time.Time) {
+func handleFrequencyUpdate(newFrequency time.Duration, timer *time.Timer, lastTick time.Time) {
 	// if timer fired, drain the channel
 	if !timer.Stop() {
 	timerLoop:
@@ -523,15 +531,15 @@ func handleDelayUpdate(newDelay time.Duration, timer *time.Timer, lastTick time.
 	timeSince := time.Since(lastTick)
 
 	// if we've exceeded the new delay trigger timer immediately
-	if timeSince >= newDelay {
+	if timeSince >= newFrequency {
 		timer.Reset(0)
 		return
 	}
 
-	timer.Reset(newDelay - timeSince)
+	timer.Reset(newFrequency - timeSince)
 }
 
-func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<- struct{}, delayUpdate <-chan time.Duration) {
+func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<- struct{}, frequencyUpdate <-chan time.Duration) {
 	timer := time.NewTimer(0)
 	var lastTick time.Time
 
@@ -549,8 +557,8 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 		case <-dataUpdate:
 			s.paintUpdate(timer, true)
 
-		case delayDuration := <-delayUpdate:
-			handleDelayUpdate(delayDuration, timer, lastTick)
+		case frequency := <-frequencyUpdate:
+			handleFrequencyUpdate(frequency, timer, lastTick)
 
 		case _, ok := <-cancel:
 			defer close(done)
@@ -573,7 +581,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 	suf := s.suffix
 	mw := s.maxWidth
 	cFn := s.colorFn
-	d := s.delayDuration
+	d := s.frequency
 	index := s.index
 
 	if !dataUpdate {
@@ -746,20 +754,25 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 	return fmt.Fprintf(w, "%s%s%s%s", prefix, colorFn(c), suffix, message)
 }
 
-// Delay updates the Delay between repainting the line.
+// Delay is deprecated in favor of Frequency.
 func (s *Spinner) Delay(d time.Duration) error {
+	return s.Frequency(d)
+}
+
+// Frequency updates the frequency of the spinner being animated.
+func (s *Spinner) Frequency(d time.Duration) error {
 	if d < 1 {
-		return errors.New("delay must be greater than 0")
+		return errors.New("duration must be greater than 0")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.delayDuration = d
+	s.frequency = d
 
 	// non-blocking notification
 	select {
-	case s.delayUpdateCh <- d:
+	case s.frequencyUpdateCh <- d:
 	default:
 	}
 

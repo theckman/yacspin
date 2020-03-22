@@ -57,7 +57,7 @@ func TestNew(t *testing.T) {
 		{
 			name:   "empty_config",
 			writer: os.Stdout,
-			err:    "cfg.Delay must be greater than 0",
+			err:    "cfg.Frequency must be greater than 0",
 		},
 		{
 			name:     "config_with_delay_and_default_writer",
@@ -68,28 +68,36 @@ func TestNew(t *testing.T) {
 			},
 		},
 		{
-			name:   "config_with_delay_and_invalid_colors",
+			name:     "config_with_frequency_and_default_writer",
+			maxWidth: 1,
+			writer:   os.Stdout,
+			cfg: Config{
+				Frequency: 100 * time.Millisecond,
+			},
+		},
+		{
+			name:   "config_with_frequency_and_invalid_colors",
 			writer: os.Stdout,
 			cfg: Config{
-				Delay:  100 * time.Millisecond,
-				Colors: []string{"invalid"},
+				Frequency: 100 * time.Millisecond,
+				Colors:    []string{"invalid"},
 			},
 			err: "failed to build color function: invalid is not a valid color",
 		},
 		{
-			name:   "config_with_delay_and_invalid_stopColors",
+			name:   "config_with_frequency_and_invalid_stopColors",
 			writer: os.Stdout,
 			cfg: Config{
-				Delay:      100 * time.Millisecond,
+				Frequency:  100 * time.Millisecond,
 				StopColors: []string{"invalid"},
 			},
 			err: "failed to build stop color function: invalid is not a valid color",
 		},
 		{
-			name:   "config_with_delay_and_invalid_stopFailColors",
+			name:   "config_with_frequency_and_invalid_stopFailColors",
 			writer: os.Stdout,
 			cfg: Config{
-				Delay:          100 * time.Millisecond,
+				Frequency:      100 * time.Millisecond,
 				StopFailColors: []string{"invalid"},
 			},
 			err: "failed to build stop fail color function: invalid is not a valid color",
@@ -99,7 +107,7 @@ func TestNew(t *testing.T) {
 			writer:   os.Stderr,
 			maxWidth: 3,
 			cfg: Config{
-				Delay:             100 * time.Millisecond,
+				Frequency:         100 * time.Millisecond,
 				Writer:            os.Stderr,
 				HideCursor:        true,
 				ColorAll:          true,
@@ -146,12 +154,18 @@ func TestNew(t *testing.T) {
 				t.Fatal("spinner.status is nil")
 			}
 
-			if spinner.delayUpdateCh == nil {
-				t.Fatal("spinner.delayUpdateCh is nil")
+			if spinner.frequencyUpdateCh == nil {
+				t.Fatal("spinner.frequencyUpdateCh is nil")
 			}
 
-			if spinner.delayDuration != tt.cfg.Delay {
-				t.Errorf("spinner.delayDuration = %s, want %s", spinner.delayDuration, tt.cfg.Delay)
+			if tt.cfg.Delay > 0 && tt.cfg.Frequency == 0 {
+				if spinner.frequency != tt.cfg.Delay {
+					t.Errorf("spinner.frequency = %s, want %s", spinner.frequency, tt.cfg.Delay)
+				}
+			} else {
+				if spinner.frequency != tt.cfg.Frequency {
+					t.Errorf("spinner.frequency = %s, want %s", spinner.frequency, tt.cfg.Frequency)
+				}
 			}
 
 			if spinner.writer == nil {
@@ -287,7 +301,7 @@ func TestNew_dumbTerm(t *testing.T) {
 	defer os.Unsetenv("TERM")
 
 	cfg := Config{
-		Delay:         500 * time.Millisecond,
+		Frequency:     500 * time.Millisecond,
 		CharSet:       CharSets[59],
 		Suffix:        " backing up database to S3: ",
 		Message:       "exporting data to file",
@@ -442,7 +456,7 @@ func TestSpinner_notifyDataChange(t *testing.T) {
 	}
 }
 
-func TestSpinner_Delay(t *testing.T) {
+func TestSpinner_Frequency(t *testing.T) {
 	tests := []struct {
 		name  string
 		input time.Duration
@@ -452,7 +466,7 @@ func TestSpinner_Delay(t *testing.T) {
 		{
 			name: "invalid",
 			ch:   make(chan time.Duration, 1),
-			err:  "delay must be greater than 0",
+			err:  "duration must be greater than 0",
 		},
 		{
 			name:  "assert_non-blocking",
@@ -471,9 +485,86 @@ func TestSpinner_Delay(t *testing.T) {
 			defer close(tt.ch)
 
 			spinner := &Spinner{
-				mu:            &sync.Mutex{},
-				delayDuration: 0,
-				delayUpdateCh: tt.ch,
+				mu:                &sync.Mutex{},
+				frequency:         0,
+				frequencyUpdateCh: tt.ch,
+			}
+
+			tmr := time.NewTimer(2 * time.Second)
+			fnch := make(chan struct{})
+
+			var err error
+
+			go func() {
+				defer close(fnch)
+				err = spinner.Frequency(tt.input)
+			}()
+
+			select {
+			case <-tmr.C:
+				t.Fatal("function blocked")
+			case <-fnch:
+				tmr.Stop()
+			}
+
+			if cont := testErrCheck(t, "spinner.Frequency()", tt.err, err); !cont {
+				return
+			}
+
+			if cap(tt.ch) == 1 {
+				select {
+				case got, ok := <-tt.ch:
+					if !ok {
+						t.Fatal("channel closed")
+					}
+					if got != tt.input {
+						t.Errorf("channel receive got = %s, want %s", got, tt.input)
+					}
+				default:
+					t.Fatal("notification channel had no messages")
+				}
+			}
+
+			got := spinner.frequency
+			if got != tt.input {
+				t.Errorf("got = %s, want %s", got, tt.input)
+			}
+		})
+	}
+}
+
+func TestSpinner_Delay(t *testing.T) {
+	tests := []struct {
+		name  string
+		input time.Duration
+		ch    chan time.Duration
+		err   string
+	}{
+		{
+			name: "invalid",
+			ch:   make(chan time.Duration, 1),
+			err:  "duration must be greater than 0",
+		},
+		{
+			name:  "assert_non-blocking",
+			input: 42,
+			ch:    make(chan time.Duration, 1),
+		},
+		{
+			name:  "assert_notification",
+			input: 42,
+			ch:    make(chan time.Duration, 1),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer close(tt.ch)
+
+			spinner := &Spinner{
+				mu:                &sync.Mutex{},
+				frequency:         0,
+				frequencyUpdateCh: tt.ch,
 			}
 
 			tmr := time.NewTimer(2 * time.Second)
@@ -511,7 +602,7 @@ func TestSpinner_Delay(t *testing.T) {
 				}
 			}
 
-			got := spinner.delayDuration
+			got := spinner.frequency
 			if got != tt.input {
 				t.Errorf("got = %s, want %s", got, tt.input)
 			}
@@ -693,8 +784,8 @@ func TestSpinner_StopFailCharacter(t *testing.T) {
 
 func TestSpinner_Reverse(t *testing.T) {
 	cfg := Config{
-		Delay:   100 * time.Millisecond,
-		CharSet: CharSets[26],
+		Frequency: 100 * time.Millisecond,
+		CharSet:   CharSets[26],
 	}
 
 	spinner, err := New(cfg)
@@ -782,7 +873,7 @@ func TestSpinner_Start(t *testing.T) {
 			spinner: &Spinner{
 				status:          uint32Ptr(statusRunning),
 				mu:              &sync.Mutex{},
-				delayDuration:   time.Millisecond,
+				frequency:       time.Millisecond,
 				colorFn:         fmt.Sprintf,
 				stopColorFn:     fmt.Sprintf,
 				stopFailColorFn: fmt.Sprintf,
@@ -794,7 +885,7 @@ func TestSpinner_Start(t *testing.T) {
 			spinner: &Spinner{
 				status:          uint32Ptr(statusStopped),
 				mu:              &sync.Mutex{},
-				delayDuration:   time.Millisecond,
+				frequency:       time.Millisecond,
 				colorFn:         fmt.Sprintf,
 				stopColorFn:     fmt.Sprintf,
 				stopFailColorFn: fmt.Sprintf,
@@ -1106,14 +1197,14 @@ func TestSpinner_paintUpdate(t *testing.T) {
 		{
 			name: "spinner_no_hide_cursor",
 			spinner: &Spinner{
-				mu:            &sync.Mutex{},
-				prefix:        "a",
-				message:       "msg",
-				suffix:        " ",
-				maxWidth:      1,
-				colorFn:       fmt.Sprintf,
-				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration: 10,
+				mu:        &sync.Mutex{},
+				prefix:    "a",
+				message:   "msg",
+				suffix:    " ",
+				maxWidth:  1,
+				colorFn:   fmt.Sprintf,
+				chars:     []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency: 10,
 			},
 			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
@@ -1127,7 +1218,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				maxWidth:        1,
 				colorFn:         fmt.Sprintf,
 				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration:   10,
+				frequency:       10,
 				suffixAutoColon: true,
 			},
 			want: "\r\033[K\ray : msg\r\033[K\raz : msg\r\033[K\raz : msg\r\033[K\ray : msg",
@@ -1135,42 +1226,42 @@ func TestSpinner_paintUpdate(t *testing.T) {
 		{
 			name: "spinner_hide_cursor",
 			spinner: &Spinner{
-				cursorHidden:  true,
-				mu:            &sync.Mutex{},
-				prefix:        "a",
-				message:       "msg",
-				suffix:        " ",
-				maxWidth:      1,
-				colorFn:       fmt.Sprintf,
-				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration: 10,
+				cursorHidden: true,
+				mu:           &sync.Mutex{},
+				prefix:       "a",
+				message:      "msg",
+				suffix:       " ",
+				maxWidth:     1,
+				colorFn:      fmt.Sprintf,
+				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:    10,
 			},
 			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
 		},
 		{
 			name: "spinner_hide_cursor_windows",
 			spinner: &Spinner{
-				cursorHidden:  true,
-				mu:            &sync.Mutex{},
-				prefix:        "a",
-				message:       "msg",
-				suffix:        " ",
-				maxWidth:      1,
-				colorFn:       fmt.Sprintf,
-				chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-				delayDuration: 10,
-				isDumbTerm:    true,
+				cursorHidden: true,
+				mu:           &sync.Mutex{},
+				prefix:       "a",
+				message:      "msg",
+				suffix:       " ",
+				maxWidth:     1,
+				colorFn:      fmt.Sprintf,
+				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:    10,
+				isDumbTerm:   true,
 			},
 			want: "\r\ray msg\r      \raz msg\r      \raz msg\r      \ray msg",
 		},
 		{
 			name: "spinner_empty_print",
 			spinner: &Spinner{
-				mu:            &sync.Mutex{},
-				maxWidth:      0,
-				colorFn:       fmt.Sprintf,
-				chars:         []character{{Value: "", Size: 0}},
-				delayDuration: 10,
+				mu:        &sync.Mutex{},
+				maxWidth:  0,
+				colorFn:   fmt.Sprintf,
+				chars:     []character{{Value: "", Size: 0}},
+				frequency: 10,
 			},
 			want: "\r\033[K\r\r\033[K\r\r\033[K\r\r\033[K\r",
 		},
@@ -1367,24 +1458,24 @@ func TestSpinner_paintStop(t *testing.T) {
 	}
 }
 
-func Test_handleDelayUpdate(t *testing.T) {
+func Test_handleFrequencyUpdate(t *testing.T) {
 	tests := []struct {
-		name        string
-		newDelay    time.Duration
-		lastTickAgo time.Duration
-		shouldTick  time.Duration
+		name         string
+		newFrequency time.Duration
+		lastTickAgo  time.Duration
+		shouldTick   time.Duration
 	}{
 		{
-			name:        "moreTime",
-			newDelay:    200 * time.Millisecond,
-			lastTickAgo: 100 * time.Millisecond,
-			shouldTick:  (100 * time.Millisecond) + (500 * time.Microsecond),
+			name:         "moreTime",
+			newFrequency: 200 * time.Millisecond,
+			lastTickAgo:  100 * time.Millisecond,
+			shouldTick:   (100 * time.Millisecond) + (500 * time.Microsecond),
 		},
 		{
-			name:        "lessTime",
-			newDelay:    100 * time.Millisecond,
-			lastTickAgo: 200 * time.Millisecond,
-			shouldTick:  100 * time.Microsecond,
+			name:         "lessTime",
+			newFrequency: 100 * time.Millisecond,
+			lastTickAgo:  200 * time.Millisecond,
+			shouldTick:   100 * time.Microsecond,
 		},
 	}
 
@@ -1395,7 +1486,7 @@ func Test_handleDelayUpdate(t *testing.T) {
 
 			time.Sleep(10 * time.Microsecond)
 
-			handleDelayUpdate(tt.newDelay, timer, lastTick)
+			handleFrequencyUpdate(tt.newFrequency, timer, lastTick)
 
 			testTimer := time.NewTimer(tt.shouldTick)
 
@@ -1457,28 +1548,28 @@ func TestSpinner_painter(t *testing.T) {
 	buf := &bytes.Buffer{}
 
 	cancel, done, dataUpdate, pause := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
-	delayUpdate := make(chan time.Duration, 1)
+	frequencyUpdate := make(chan time.Duration, 1)
 
 	spinner := &Spinner{
-		mu:            &sync.Mutex{},
-		writer:        buf,
-		prefix:        "a",
-		message:       "msg",
-		suffix:        " ",
-		maxWidth:      1,
-		colorFn:       fmt.Sprintf,
-		chars:         []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-		stopColorFn:   fmt.Sprintf,
-		stopMsg:       "stop",
-		stopChar:      character{Value: "v", Size: 1},
-		delayDuration: 20 * time.Millisecond,
-		cancelCh:      cancel,
-		doneCh:        done,
-		dataUpdateCh:  dataUpdate,
-		delayUpdateCh: delayUpdate,
+		mu:                &sync.Mutex{},
+		writer:            buf,
+		prefix:            "a",
+		message:           "msg",
+		suffix:            " ",
+		maxWidth:          1,
+		colorFn:           fmt.Sprintf,
+		chars:             []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+		stopColorFn:       fmt.Sprintf,
+		stopMsg:           "stop",
+		stopChar:          character{Value: "v", Size: 1},
+		frequency:         20 * time.Millisecond,
+		cancelCh:          cancel,
+		doneCh:            done,
+		dataUpdateCh:      dataUpdate,
+		frequencyUpdateCh: frequencyUpdate,
 	}
 
-	go spinner.painter(cancel, dataUpdate, pause, done, delayUpdate)
+	go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
 
 	time.Sleep(3 * time.Millisecond)
 
@@ -1507,8 +1598,8 @@ func TestSpinner_painter(t *testing.T) {
 	spinner.mu.Lock()
 
 	spinner.message = "msg"
-	spinner.delayDuration = 5 * time.Millisecond
-	delayUpdate <- 5 * time.Millisecond
+	spinner.frequency = 5 * time.Millisecond
+	frequencyUpdate <- 5 * time.Millisecond
 
 	spinner.mu.Unlock()
 
