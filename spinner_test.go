@@ -958,15 +958,26 @@ func TestSpinner_Stop(t *testing.T) {
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
-			err: "spinner not running or shutting down",
+			err: "spinner not running or paused",
 		},
 		{
-			name: "not_running",
+			name: "running",
 			spinner: &Spinner{
 				mu:       &sync.Mutex{},
-				status:   uint32Ptr(2),
+				status:   uint32Ptr(statusRunning),
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
+			},
+		},
+		{
+			name: "paused",
+			spinner: &Spinner{
+				mu:         &sync.Mutex{},
+				status:     uint32Ptr(statusPaused),
+				cancelCh:   make(chan struct{}),
+				doneCh:     make(chan struct{}),
+				unpauseCh:  make(chan struct{}),
+				unpausedCh: make(chan struct{}),
 			},
 		},
 	}
@@ -974,6 +985,10 @@ func TestSpinner_Stop(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt // create local copy
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.spinner.unpausedCh != nil {
+				close(tt.spinner.unpausedCh)
+			}
+
 			var ok bool
 			wait := make(chan struct{})
 
@@ -1027,7 +1042,7 @@ func TestSpinner_StopFail(t *testing.T) {
 				cancelCh: make(chan struct{}),
 				doneCh:   make(chan struct{}),
 			},
-			err: "spinner not running or shutting down",
+			err: "spinner not running or paused",
 		},
 		{
 			name: "not_running",
