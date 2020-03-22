@@ -423,6 +423,16 @@ func (s *Spinner) Unpause() error {
 		return errors.New("spinner not paused")
 	}
 
+	s.unpause()
+
+	if !atomic.CompareAndSwapUint32(s.status, statusUnpausing, statusRunning) {
+		panic("atomic invariant encountered")
+	}
+
+	return nil
+}
+
+func (s *Spinner) unpause() {
 	// tell the painter to unpause
 	close(s.unpauseCh)
 
@@ -432,12 +442,6 @@ func (s *Spinner) Unpause() error {
 	// clear the no longer needed channels
 	s.unpauseCh = nil
 	s.unpausedCh = nil
-
-	if !atomic.CompareAndSwapUint32(s.status, statusUnpausing, statusRunning) {
-		panic("atomic invariant encountered")
-	}
-
-	return nil
 }
 
 // Stop disables the spinner, and prints the StopCharacter with the StopMessage
@@ -456,9 +460,11 @@ func (s *Spinner) StopFail() error {
 
 func (s *Spinner) stop(fail bool) error {
 	// move us to a stopping state to protect against concurrent Stop() calls
-	a := atomic.CompareAndSwapUint32(s.status, statusRunning, statusStopping)
-	if !a {
-		return errors.New("spinner not running or shutting down")
+	wasRunning := atomic.CompareAndSwapUint32(s.status, statusRunning, statusStopping)
+	wasPaused := atomic.CompareAndSwapUint32(s.status, statusPaused, statusStopping)
+
+	if !wasRunning && !wasPaused {
+		return errors.New("spinner not running or paused")
 	}
 
 	// we now have an atomic guarantees of no other threads invoking state changes
@@ -470,6 +476,10 @@ func (s *Spinner) stop(fail bool) error {
 	}
 
 	close(s.cancelCh)
+
+	if wasPaused {
+		s.unpause()
+	}
 
 	// wait for the painter to stop
 	<-s.doneCh
@@ -487,8 +497,7 @@ func (s *Spinner) stop(fail bool) error {
 	s.pauseCh = nil
 
 	// move us to the stopped state
-	a = atomic.CompareAndSwapUint32(s.status, statusStopping, statusStopped)
-	if !a {
+	if !atomic.CompareAndSwapUint32(s.status, statusStopping, statusStopped) {
 		panic("atomic invariant encountered")
 	}
 
