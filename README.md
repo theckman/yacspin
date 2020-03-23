@@ -127,8 +127,8 @@ spinner.Stop()
 ```
 
 ## Spinners
-yacspin.CharSets index | sample gif
------------------------|------------
+yacspin.CharSets index | sample gif (Frequency: 200ms)
+-----------------------|------------------------------
 0 | ![0 gif](https://raw.githubusercontent.com/theckman/yacspin-gifs/master/spinners/0.gif)
 1 | ![1 gif](https://raw.githubusercontent.com/theckman/yacspin-gifs/master/spinners/1.gif)
 2 | ![2 gif](https://raw.githubusercontent.com/theckman/yacspin-gifs/master/spinners/2.gif)
