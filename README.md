@@ -54,7 +54,7 @@ spinner to result in a success message or a failure message. The messages,
 colors, and even the character used to denote success or failure are
 customizable in either the initial config or via the methods.
 
-By doing this you can use the spinner to display the satus of a list of tasks
+By doing this you can use the spinner to display the status of a list of tasks
 being executed serially.
 
 ##### Stop
