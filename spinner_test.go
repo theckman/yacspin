@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,6 +47,10 @@ func testErrCheck(t *testing.T, name string, errContains string, err error) bool
 	return true
 }
 
+func getReflectFnName(f interface{}) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -58,6 +64,29 @@ func TestNew(t *testing.T) {
 			name:   "empty_config",
 			writer: os.Stdout,
 			err:    "cfg.Frequency must be greater than 0",
+		},
+		{
+			name:     "writer and writeFn provided",
+			maxWidth: 1,
+			cfg: Config{
+				Frequency: 100 * time.Millisecond,
+				WriteFn: func(s string) {
+
+				},
+				Writer: os.Stderr,
+			},
+			writer: os.Stderr,
+			err: "only one of cfg.Writer and cfg.WriteFn should be provided",
+		},
+		{
+			name:     "writeFn provided",
+			maxWidth: 1,
+			cfg: Config{
+				Frequency: 100 * time.Millisecond,
+				WriteFn: func(s string) {
+
+				},
+			},
 		},
 		{
 			name:     "config_with_delay_and_default_writer",
@@ -168,12 +197,24 @@ func TestNew(t *testing.T) {
 				}
 			}
 
-			if spinner.writer == nil {
-				t.Fatal("spinner.writer is nil")
+			if spinner.writeFn == nil && spinner.writer == nil {
+				t.Fatal("spinner.writer and spinner.writeFn are nil")
 			}
 
-			if spinner.writer != tt.writer {
+			if spinner.writer != nil && spinner.writer != tt.writer {
 				t.Errorf("spinner.writer = %#v, want %#v", spinner.writer, tt.writer)
+			}
+
+			if tt.cfg.WriteFn != nil {
+				wantFnName := getReflectFnName(tt.cfg.WriteFn)
+				if spinner.writeFn == nil {
+					t.Errorf("spinner.writeFn = %#v, want %#v", nil, wantFnName)
+				} else {
+					gotFnName := getReflectFnName(spinner.writeFn)
+					if wantFnName != gotFnName {
+						t.Errorf("spinner.writeFn = %#v, want %#v", gotFnName, wantFnName)
+					}
+				}
 			}
 
 			if spinner.prefix != tt.cfg.Prefix {
@@ -1209,7 +1250,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
 		{
-			name: "spinner_no_hide_cursor_auto_cursor",
+			name: "spinner_no_hide_cursor_suffix_auto_colon",
 			spinner: &Spinner{
 				mu:              &sync.Mutex{},
 				prefix:          "a",
@@ -1283,6 +1324,121 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			got := buf.String()
 
 			if got != tt.want {
+				t.Errorf("got = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+
+	writeFnBasicWants := []string{
+		"ay msg",
+		"az msg",
+		"az msg",
+		"ay msg",
+	}
+	writeFnTests := []struct {
+		name    string
+		spinner *Spinner
+		want    []string
+	}{
+		{
+			name: "spinner",
+			spinner: &Spinner{
+				mu:        &sync.Mutex{},
+				prefix:    "a",
+				message:   "msg",
+				suffix:    " ",
+				maxWidth:  1,
+				colorFn:   fmt.Sprintf,
+				chars:     []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency: 10,
+			},
+			want: writeFnBasicWants,
+		},
+		{
+			name: "spinner_no_hide_cursor_suffix_auto_colon",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				message:         "msg",
+				suffix:          " ",
+				maxWidth:        1,
+				colorFn:         fmt.Sprintf,
+				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:       10,
+				suffixAutoColon: true,
+			},
+			want: []string{
+				"ay : msg",
+				"az : msg",
+				"az : msg",
+				"ay : msg",
+			},
+		},
+		{
+			name: "spinner_hide_cursor",
+			spinner: &Spinner{
+				cursorHidden: true,
+				mu:           &sync.Mutex{},
+				prefix:       "a",
+				message:      "msg",
+				suffix:       " ",
+				maxWidth:     1,
+				colorFn:      fmt.Sprintf,
+				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:    10,
+			},
+			want: writeFnBasicWants,
+		},
+		{
+			name: "spinner_dumbTerm",
+			spinner: &Spinner{
+				cursorHidden: true,
+				mu:           &sync.Mutex{},
+				prefix:       "a",
+				message:      "msg",
+				suffix:       " ",
+				maxWidth:     1,
+				colorFn:      fmt.Sprintf,
+				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:    10,
+				isDumbTerm:   true,
+			},
+			want: writeFnBasicWants,
+		},
+		{
+			name: "spinner_empty_print",
+			spinner: &Spinner{
+				mu:        &sync.Mutex{},
+				maxWidth:  0,
+				colorFn:   fmt.Sprintf,
+				chars:     []character{{Value: "", Size: 0}},
+				frequency: 10,
+			},
+			want: []string{
+				"",
+				"",
+				"",
+				"",
+			},
+		},
+	}
+
+	for _, tt := range writeFnTests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			tt.spinner.writeFn = func(s string) {
+				got = append(got, s)
+			}
+
+			tm := time.NewTimer(10 * time.Millisecond)
+
+			tt.spinner.paintUpdate(tm, false)
+			tt.spinner.paintUpdate(tm, false)
+			tt.spinner.paintUpdate(tm, true)
+			tt.spinner.paintUpdate(tm, false)
+			tm.Stop()
+
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("got = %#v, want %#v", got, tt.want)
 			}
 		})
@@ -1452,6 +1608,193 @@ func TestSpinner_paintStop(t *testing.T) {
 			got := buf.String()
 
 			if got != tt.want {
+				t.Errorf("got = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+
+	writeFnTests := []struct {
+		name    string
+		ok      bool
+		spinner *Spinner
+		want    []string
+	}{
+		{
+			name: "ok",
+			ok:   true,
+			spinner: &Spinner{
+				mu:          &sync.Mutex{},
+				prefix:      "a",
+				suffix:      " ",
+				maxWidth:    1,
+				stopColorFn: fmt.Sprintf,
+				stopChar:    character{Value: "x", Size: 1},
+				stopMsg:     "stop",
+			},
+			want: []string{
+				"ax stop",
+			},
+		},
+		{
+			name: "ok_auto_colon",
+			ok:   true,
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopColorFn:     fmt.Sprintf,
+				stopChar:        character{Value: "x", Size: 1},
+				stopMsg:         "stop",
+				suffixAutoColon: true,
+			},
+			want: []string{
+				"ax : stop",
+			},
+		},
+		{
+			name: "ok_auto_colon_no_msg",
+			ok:   true,
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopColorFn:     fmt.Sprintf,
+				stopChar:        character{Value: "x", Size: 1},
+				stopMsg:         "",
+				suffixAutoColon: true,
+			},
+			want: []string{
+				"ax ",
+			},
+		},
+		{
+			name: "ok_unhide",
+			ok:   true,
+			spinner: &Spinner{
+				mu:           &sync.Mutex{},
+				cursorHidden: true,
+				prefix:       "a",
+				suffix:       " ",
+				maxWidth:     1,
+				stopColorFn:  fmt.Sprintf,
+				stopChar:     character{Value: "x", Size: 1},
+				stopMsg:      "stop",
+			},
+			want: []string{
+				"ax stop",
+			},
+		},
+		{
+			name: "ok_unhide_windows",
+			ok:   true,
+			spinner: &Spinner{
+				mu:           &sync.Mutex{},
+				cursorHidden: true,
+				prefix:       "a",
+				suffix:       " ",
+				maxWidth:     1,
+				stopColorFn:  fmt.Sprintf,
+				stopChar:     character{Value: "x", Size: 1},
+				stopMsg:      "stop",
+				isDumbTerm:   true,
+				lastPrintLen: 10,
+			},
+			want: []string{
+				"ax stop",
+			},
+		},
+		{
+			name: "fail",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopFailColorFn: fmt.Sprintf,
+				stopFailChar:    character{Value: "y", Size: 1},
+				stopFailMsg:     "stop",
+			},
+			want: []string{
+				"ay stop",
+			},
+		},
+		{
+			name: "fail_no_char_no_msg",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopFailColorFn: fmt.Sprintf,
+			},
+			want: []string{
+				"",
+			},
+		},
+		{
+			name: "fail_no_char_no_msg_dumb_term",
+			spinner: &Spinner{
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " ",
+				maxWidth:        1,
+				isDumbTerm:      true,
+				stopFailColorFn: fmt.Sprintf,
+			},
+			want: []string{
+				"",
+			},
+		},
+		{
+			name: "fail_colorall",
+			spinner: &Spinner{
+				mu:       &sync.Mutex{},
+				prefix:   "a",
+				suffix:   " ",
+				maxWidth: 1,
+				stopFailColorFn: func(format string, a ...interface{}) string {
+					return fmt.Sprintf("fullColor: %s", fmt.Sprintf(format, a...))
+				},
+				stopFailChar: character{Value: "y", Size: 1},
+				stopFailMsg:  "stop",
+				colorAll:     true,
+			},
+			want: []string{
+				"fullColor: ay stop",
+			},
+		},
+		{
+			name: "fail_colorall_no_char",
+			spinner: &Spinner{
+				mu:       &sync.Mutex{},
+				prefix:   "a",
+				suffix:   " ",
+				maxWidth: 0,
+				stopFailColorFn: func(format string, a ...interface{}) string {
+					return fmt.Sprintf("fullColor: %s", fmt.Sprintf(format, a...))
+				},
+				stopFailChar: character{Value: "", Size: 0},
+				stopFailMsg:  "stop",
+				colorAll:     true,
+			},
+			want: []string{
+				"fullColor: stop",
+			},
+		},
+	}
+
+	for _, tt := range writeFnTests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			tt.spinner.writeFn = func(s string) {
+				got = append(got, s)
+			}
+
+			tt.spinner.paintStop(tt.ok)
+
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("got = %#v, want %#v", got, tt.want)
 			}
 		})

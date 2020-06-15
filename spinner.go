@@ -36,6 +36,7 @@
 package yacspin
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -90,8 +91,13 @@ type Config struct {
 	Delay time.Duration
 
 	// Writer is the place where we are outputting the spinner, and can't be
-	// changed on the fly. If omitted, this defaults to os.Stdout.
+	// changed on the fly. If omitted, and WriteFn is omitted, this defaults to os.Stdout.
 	Writer io.Writer
+
+	// WriteFn is where the output of the spinner (sans any "erase" characters)
+	// is written to. If this is provided in addition to `Writer` an error returned
+	// when creating a new spinner
+	WriteFn func(string)
 
 	// HideCursor describes whether the cursor should be hidden by the spinner.
 	// If it is hidden, it will be restored when the spinner stops. This can't
@@ -159,6 +165,7 @@ type Config struct {
 // Note: You need to use New() to construct a *Spinner.
 type Spinner struct {
 	writer          io.Writer
+	writeFn         func(string)
 	colorAll        bool
 	cursorHidden    bool
 	suffixAutoColon bool
@@ -247,7 +254,13 @@ func New(cfg Config) (*Spinner, error) {
 	// can only error if the charset is empty, and we prevent that above
 	_ = s.CharSet(cfg.CharSet)
 
-	if cfg.Writer == nil {
+	if cfg.Writer != nil && cfg.WriteFn != nil {
+		return nil, errors.New("only one of cfg.Writer and cfg.WriteFn should be provided")
+	}
+
+	if cfg.WriteFn != nil {
+		s.writeFn = cfg.WriteFn
+	} else if cfg.Writer == nil {
 		cfg.Writer = os.Stdout
 	}
 
@@ -604,7 +617,13 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 
 	s.mu.Unlock()
 
-	if !s.isDumbTerm {
+	if s.writeFn != nil {
+		buf := new(bytes.Buffer)
+		if _, err := paint(buf, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
+			panic(fmt.Sprintf("failed to paint line: %v", err))
+		}
+		s.writeFn(buf.String())
+	} else if !s.isDumbTerm {
 		if err := s.erase(); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
@@ -660,7 +679,13 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 	s.mu.Unlock()
 
-	if !s.isDumbTerm {
+	if s.writeFn != nil {
+		buf := new(bytes.Buffer)
+		if _, err := paint(buf, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
+			panic(fmt.Sprintf("failed to paint line: %v", err))
+		}
+		s.writeFn(buf.String())
+	} else if !s.isDumbTerm {
 		if err := s.erase(); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
