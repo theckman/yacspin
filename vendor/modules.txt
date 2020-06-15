@@ -1,0 +1,25 @@
+# github.com/fatih/color v1.7.0
+## explicit
+github.com/fatih/color
+# github.com/google/go-cmp v0.3.1
+## explicit
+github.com/google/go-cmp/cmp
+github.com/google/go-cmp/cmp/internal/diff
+github.com/google/go-cmp/cmp/internal/flags
+github.com/google/go-cmp/cmp/internal/function
+github.com/google/go-cmp/cmp/internal/value
+# github.com/mattn/go-colorable v0.0.9
+## explicit
+github.com/mattn/go-colorable
+# github.com/mattn/go-isatty v0.0.11
+## explicit
+github.com/mattn/go-isatty
+# github.com/mattn/go-runewidth v0.0.7
+## explicit
+github.com/mattn/go-runewidth
+# github.com/pkg/errors v0.8.1
+## explicit
+github.com/pkg/errors
+# golang.org/x/sys v0.0.0-20191224085550-c709ea063b76
+## explicit
+golang.org/x/sys/unix
