@@ -45,6 +45,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-runewidth"
 	"github.com/pkg/errors"
 )
@@ -248,7 +249,7 @@ func New(cfg Config) (*Spinner, error) {
 	_ = s.CharSet(cfg.CharSet)
 
 	if cfg.Writer == nil {
-		cfg.Writer = os.Stdout
+		cfg.Writer = colorable.NewColorableStdout()
 	}
 
 	s.writer = cfg.Writer
@@ -623,7 +624,13 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, false, fmt.Sprintf)
+		if s.cursorHidden {
+			if err := s.hideCursor(); err != nil {
+				panic(fmt.Sprintf("failed to hide cursor: %v", err))
+			}
+		}
+
+		n, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, false, cFn)
 
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
@@ -689,7 +696,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 			return
 		}
 
-		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, false, fmt.Sprintf); err != nil {
+		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 
