@@ -14,7 +14,6 @@ import (
 	"fmt"
 
 	"github.com/fatih/color"
-	"github.com/pkg/errors"
 )
 
 // ValidColors holds the list of the strings that are mapped to
@@ -165,7 +164,7 @@ func colorFunc(colors ...string) (func(format string, a ...interface{}) string, 
 
 	for i, color := range colors {
 		if !validColor(color) {
-			return nil, errors.Errorf("%s is not a valid color", color)
+			return nil, fmt.Errorf("%s is not a valid color", color)
 		}
 
 		attrib[i] = colorAttributeMap[color]
