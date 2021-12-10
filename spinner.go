@@ -36,6 +36,7 @@
 package yacspin
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -46,7 +47,6 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
-	"github.com/pkg/errors"
 )
 
 type character struct {
@@ -569,7 +569,6 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 
 			return
 		}
-
 	}
 }
 
@@ -590,7 +589,6 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 		if s.index == len(s.chars) {
 			s.index = 0
 		}
-
 	} else {
 		// for data updates use the last spinner char
 		index--
@@ -624,7 +622,6 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 		}
 
 		n, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, false, fmt.Sprintf)
-
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
@@ -679,7 +676,6 @@ func (s *Spinner) paintStop(chanOk bool) {
 		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
-
 	} else {
 		if err := s.eraseWindows(); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
@@ -818,7 +814,7 @@ func (s *Spinner) Message(message string) {
 func (s *Spinner) Colors(colors ...string) error {
 	colorFn, err := colorFunc(colors...)
 	if err != nil {
-		return errors.Wrapf(err, "failed to build color function")
+		return fmt.Errorf("failed to build color function: %w", err)
 	}
 
 	s.mu.Lock()
@@ -846,7 +842,7 @@ func (s *Spinner) StopMessage(message string) {
 func (s *Spinner) StopColors(colors ...string) error {
 	colorFn, err := colorFunc(colors...)
 	if err != nil {
-		return errors.Wrapf(err, "failed to build stop color function")
+		return fmt.Errorf("failed to build stop color function: %w", err)
 	}
 
 	s.mu.Lock()
@@ -891,7 +887,7 @@ func (s *Spinner) StopFailMessage(message string) {
 func (s *Spinner) StopFailColors(colors ...string) error {
 	colorFn, err := colorFunc(colors...)
 	if err != nil {
-		return errors.Wrapf(err, "failed to build stop fail color function")
+		return fmt.Errorf("failed to build stop fail color function: %w", err)
 	}
 
 	s.mu.Lock()

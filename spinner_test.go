@@ -297,8 +297,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNew_dumbTerm(t *testing.T) {
-	os.Setenv("TERM", "dumb")
-	defer os.Unsetenv("TERM")
+	t.Setenv("TERM", "dumb")
 
 	cfg := Config{
 		Frequency:     500 * time.Millisecond,
@@ -1611,8 +1610,8 @@ func TestSpinner_painter(t *testing.T) {
 
 	got := buf.String()
 
-	if got != want {
-		t.Fatalf("got = %#v, want %#v", got, want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("output differs: (-want / +got)\n%s", diff)
 	}
 }
 

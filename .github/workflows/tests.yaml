@@ -1,0 +1,36 @@
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+  pull_request: {}
+
+name: tests
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.16.x, 1.17.x]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v2
+    - name: Run tests
+      run: 'go test -v ./... -coverprofile="coverage.txt" -covermode=atomic'
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v2
+      with:
+        token: 9b9ef0f3-fd9b-4394-80c2-8f7973b61696
+        files: coverage.txt
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: true
+        verbose: true
