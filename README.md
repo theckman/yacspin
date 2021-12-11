@@ -18,10 +18,10 @@ this package is released under the Apache 2.0 License.
 ## Yet Another CLi Spinner?
 The other Go spinner ties the ability to show updated information to the
 spinner's animation, meaning you can't always show all the information you want
-to the end user without changing the animation speed. In addition there were
-also some API design choices that have made it unsafe for concurrent use (while
-it's running), which presents challenges when trying to update the text in the
-spinner while it's animating in the first place
+to the end user without changing the animation speed. In addition, there were
+also some API design choices that have made it unsafe for concurrent use, which
+presents challenges when trying to update the text in the spinner while it's
+animating.
 
 There was also an interest in the spinner being able to represent a task, and to
 indicate whether it failed or was successful. This would have further compounded
