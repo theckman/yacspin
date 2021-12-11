@@ -36,6 +36,7 @@
 package yacspin
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -155,6 +156,7 @@ type Config struct {
 // Note: You need to use New() to construct a *Spinner.
 type Spinner struct {
 	writer          io.Writer
+	buffer          *bytes.Buffer
 	colorAll        bool
 	cursorHidden    bool
 	suffixAutoColon bool
@@ -205,6 +207,7 @@ func New(cfg Config) (*Spinner, error) {
 	}
 
 	s := &Spinner{
+		buffer:            bytes.NewBuffer(make([]byte, 2048)),
 		mu:                &sync.Mutex{},
 		frequency:         cfg.Frequency,
 		status:            uint32Ptr(0),
@@ -582,31 +585,39 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 
 	s.mu.Unlock()
 
+	defer s.buffer.Reset()
+
 	if !s.isDumbTerm {
-		if err := s.erase(); err != nil {
+		if err := erase(s.buffer); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
 		if s.cursorHidden {
-			if err := s.hideCursor(); err != nil {
+			if err := hideCursor(s.buffer); err != nil {
 				panic(fmt.Sprintf("failed to hide cursor: %v", err))
 			}
 		}
 
-		if _, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
+		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 	} else {
-		if err := s.eraseWindows(); err != nil {
+		if err := s.eraseDumbTerm(s.buffer); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.writer, mw, c, p, m, suf, s.suffixAutoColon, false, fmt.Sprintf)
+		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, fmt.Sprintf)
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 
 		s.lastPrintLen = n
+	}
+
+	if s.buffer.Len() > 0 {
+		if _, err := s.writer.Write(s.buffer.Bytes()); err != nil {
+			panic(fmt.Sprintf("failed to output buffer to writer: %v", err))
+		}
 	}
 
 	if !dataUpdate {
@@ -637,63 +648,67 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 	s.mu.Unlock()
 
+	defer s.buffer.Reset()
+
 	if !s.isDumbTerm {
-		if err := s.erase(); err != nil {
+		if err := erase(s.buffer); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
 		if s.cursorHidden {
-			if err := s.unhideCursor(); err != nil {
+			if err := unhideCursor(s.buffer); err != nil {
 				panic(fmt.Sprintf("failed to hide cursor: %v", err))
 			}
 		}
 
-		if c.Size == 0 && len(m) == 0 {
-			return
-		}
-
-		// paint the line with a newline as it's the final line
-		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
-			panic(fmt.Sprintf("failed to paint line: %v", err))
+		if c.Size > 0 || len(m) > 0 {
+			// paint the line with a newline as it's the final line
+			if _, err := paint(s.buffer, mw, c, p, m+"\n", suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
+				panic(fmt.Sprintf("failed to paint line: %v", err))
+			}
 		}
 	} else {
-		if err := s.eraseWindows(); err != nil {
+		if err := s.eraseDumbTerm(s.buffer); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		if c.Size == 0 && len(m) == 0 {
-			return
-		}
-
-		if _, err := paint(s.writer, mw, c, p, m+"\n", suf, s.suffixAutoColon, false, fmt.Sprintf); err != nil {
-			panic(fmt.Sprintf("failed to paint line: %v", err))
+		if c.Size > 0 || len(m) > 0 {
+			if _, err := paint(s.buffer, mw, c, p, m+"\n", suf, s.suffixAutoColon, false, fmt.Sprintf); err != nil {
+				panic(fmt.Sprintf("failed to paint line: %v", err))
+			}
 		}
 
 		s.lastPrintLen = 0
 	}
+
+	if s.buffer.Len() > 0 {
+		if _, err := s.writer.Write(s.buffer.Bytes()); err != nil {
+			panic(fmt.Sprintf("failed to output buffer to writer: %v", err))
+		}
+	}
 }
 
 // erase clears the line
-func (s *Spinner) erase() error {
-	_, err := fmt.Fprint(s.writer, "\r\033[K\r")
+func erase(w io.Writer) error {
+	_, err := fmt.Fprint(w, "\r\033[K\r")
 	return err
 }
 
-// eraseWindows clears the line on Windows
-func (s *Spinner) eraseWindows() error {
+// eraseDumbTerm clears the line on dumb terminals
+func (s *Spinner) eraseDumbTerm(w io.Writer) error {
 	clear := "\r" + strings.Repeat(" ", s.lastPrintLen) + "\r"
 
-	_, err := fmt.Fprint(s.writer, clear)
+	_, err := fmt.Fprint(w, clear)
 	return err
 }
 
-func (s *Spinner) hideCursor() error {
-	_, err := fmt.Fprint(s.writer, "\r\033[?25l\r")
+func hideCursor(w io.Writer) error {
+	_, err := fmt.Fprint(w, "\r\033[?25l\r")
 	return err
 }
 
-func (s *Spinner) unhideCursor() error {
-	_, err := fmt.Fprint(s.writer, "\r\033[?25h\r")
+func unhideCursor(w io.Writer) error {
+	_, err := fmt.Fprint(w, "\r\033[?25h\r")
 	return err
 }
 
@@ -704,8 +719,8 @@ func padChar(char character, maxWidth int) string {
 	return char.Value + strings.Repeat(" ", padSize)
 }
 
-// paint writes a single line to the s.writer, using the provided character,
-// message, and color function
+// paint writes a single line to the w, using the provided character, message,
+// and color function
 func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll bool, colorFn func(format string, a ...interface{}) string) (int, error) {
 	if char.Size == 0 {
 		if colorAll {
