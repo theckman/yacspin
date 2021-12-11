@@ -18,7 +18,7 @@ import (
 
 // ValidColors holds the list of the strings that are mapped to
 // github.com/fatih/color color attributes. Any of these colors / attributes can
-// be used with the *Spinner type.
+// be used with the *Spinner type, and it should be reflected in the output.
 var ValidColors = map[string]struct{}{
 	// default colors for backwards compatibility
 	"black":   {},
