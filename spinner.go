@@ -40,12 +40,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -222,7 +222,7 @@ func New(cfg Config) (*Spinner, error) {
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
 		suffixAutoColon: cfg.SuffixAutoColon,
-		isDumbTerm:      os.Getenv("TERM") == "dumb" || runtime.GOOS == "windows",
+		isDumbTerm:      os.Getenv("TERM") == "dumb",
 		colorFn:         fmt.Sprintf,
 		stopColorFn:     fmt.Sprintf,
 		stopFailColorFn: fmt.Sprintf,
@@ -248,7 +248,7 @@ func New(cfg Config) (*Spinner, error) {
 	_ = s.CharSet(cfg.CharSet)
 
 	if cfg.Writer == nil {
-		cfg.Writer = os.Stdout
+		cfg.Writer = colorable.NewColorableStdout()
 	}
 
 	s.writer = cfg.Writer
