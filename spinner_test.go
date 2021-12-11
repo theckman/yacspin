@@ -1542,6 +1542,10 @@ func Test_setToCharSlice(t *testing.T) {
 }
 
 func TestSpinner_painter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode.")
+	}
+
 	const want = "\r\033[K\ray msg\r\033[K\ray othermsg\r\033[K\raz msg\r\033[K\ray msg\r\x1b[K\rav stop\n"
 
 	buf := &bytes.Buffer{}
@@ -1561,7 +1565,7 @@ func TestSpinner_painter(t *testing.T) {
 		stopColorFn:       fmt.Sprintf,
 		stopMsg:           "stop",
 		stopChar:          character{Value: "v", Size: 1},
-		frequency:         400 * time.Millisecond,
+		frequency:         2000 * time.Millisecond,
 		cancelCh:          cancel,
 		doneCh:            done,
 		dataUpdateCh:      dataUpdate,
@@ -1570,7 +1574,7 @@ func TestSpinner_painter(t *testing.T) {
 
 	go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	spinner.mu.Lock()
 
@@ -1579,7 +1583,7 @@ func TestSpinner_painter(t *testing.T) {
 
 	spinner.mu.Unlock()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	spinner.unpauseCh, spinner.unpausedCh = make(chan struct{}), make(chan struct{})
 	pause <- struct{}{}
@@ -1597,12 +1601,12 @@ func TestSpinner_painter(t *testing.T) {
 	spinner.mu.Lock()
 
 	spinner.message = "msg"
-	spinner.frequency = 200 * time.Millisecond
-	frequencyUpdate <- 200 * time.Millisecond
+	spinner.frequency = 1000 * time.Millisecond
+	frequencyUpdate <- 1000 * time.Millisecond
 
 	spinner.mu.Unlock()
 
-	time.Sleep(210 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 
 	cancel <- struct{}{}
 
