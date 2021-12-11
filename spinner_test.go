@@ -685,9 +685,7 @@ func TestSpinner_erase(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 
-	spinner := &Spinner{writer: buf}
-
-	testErrCheck(t, "spinner.erase()", "", spinner.erase())
+	testErrCheck(t, "spinner.erase()", "", erase(buf))
 
 	got := buf.String()
 
@@ -701,9 +699,7 @@ func TestSpinner_hideCursor(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 
-	spinner := &Spinner{writer: buf}
-
-	testErrCheck(t, "spinner.hideCursor()", "", spinner.hideCursor())
+	testErrCheck(t, "spinner.hideCursor()", "", hideCursor(buf))
 
 	got := buf.String()
 
@@ -717,9 +713,7 @@ func TestSpinner_unhideCursor(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 
-	spinner := &Spinner{writer: buf}
-
-	testErrCheck(t, "spinner.unhideCursor()", "", spinner.unhideCursor())
+	testErrCheck(t, "spinner.unhideCursor()", "", unhideCursor(buf))
 
 	got := buf.String()
 
@@ -750,12 +744,15 @@ func TestSpinner_Start(t *testing.T) {
 		{
 			name: "spinner",
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				status:          uint32Ptr(statusStopped),
 				mu:              &sync.Mutex{},
 				frequency:       time.Millisecond,
 				colorFn:         fmt.Sprintf,
 				stopColorFn:     fmt.Sprintf,
 				stopFailColorFn: fmt.Sprintf,
+				stopMsg:         "stop msg",
+				stopFailMsg:     "stop fail msg",
 			},
 		},
 	}
@@ -1064,6 +1061,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 		{
 			name: "spinner_no_hide_cursor",
 			spinner: &Spinner{
+				buffer:    &bytes.Buffer{},
 				mu:        &sync.Mutex{},
 				prefix:    "a",
 				message:   "msg",
@@ -1078,6 +1076,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 		{
 			name: "spinner_no_hide_cursor_auto_cursor",
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
 				prefix:          "a",
 				message:         "msg",
@@ -1093,6 +1092,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 		{
 			name: "spinner_hide_cursor",
 			spinner: &Spinner{
+				buffer:       &bytes.Buffer{},
 				cursorHidden: true,
 				mu:           &sync.Mutex{},
 				prefix:       "a",
@@ -1106,8 +1106,9 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
 		},
 		{
-			name: "spinner_hide_cursor_windows",
+			name: "spinner_hide_cursor_dumbterm",
 			spinner: &Spinner{
+				buffer:       &bytes.Buffer{},
 				cursorHidden: true,
 				mu:           &sync.Mutex{},
 				prefix:       "a",
@@ -1124,6 +1125,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 		{
 			name: "spinner_empty_print",
 			spinner: &Spinner{
+				buffer:    &bytes.Buffer{},
 				mu:        &sync.Mutex{},
 				maxWidth:  0,
 				colorFn:   fmt.Sprintf,
@@ -1167,6 +1169,7 @@ func TestSpinner_paintStop(t *testing.T) {
 			name: "ok",
 			ok:   true,
 			spinner: &Spinner{
+				buffer:      &bytes.Buffer{},
 				mu:          &sync.Mutex{},
 				prefix:      "a",
 				suffix:      " ",
@@ -1181,6 +1184,7 @@ func TestSpinner_paintStop(t *testing.T) {
 			name: "ok_auto_colon",
 			ok:   true,
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
 				prefix:          "a",
 				suffix:          " ",
@@ -1196,6 +1200,7 @@ func TestSpinner_paintStop(t *testing.T) {
 			name: "ok_auto_colon_no_msg",
 			ok:   true,
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
 				prefix:          "a",
 				suffix:          " ",
@@ -1211,6 +1216,7 @@ func TestSpinner_paintStop(t *testing.T) {
 			name: "ok_unhide",
 			ok:   true,
 			spinner: &Spinner{
+				buffer:       &bytes.Buffer{},
 				mu:           &sync.Mutex{},
 				cursorHidden: true,
 				prefix:       "a",
@@ -1223,9 +1229,10 @@ func TestSpinner_paintStop(t *testing.T) {
 			want: "\r\033[K\r\r\033[?25h\rax stop\n",
 		},
 		{
-			name: "ok_unhide_windows",
+			name: "ok_unhide_dumbterm",
 			ok:   true,
 			spinner: &Spinner{
+				buffer:       &bytes.Buffer{},
 				mu:           &sync.Mutex{},
 				cursorHidden: true,
 				prefix:       "a",
@@ -1242,6 +1249,7 @@ func TestSpinner_paintStop(t *testing.T) {
 		{
 			name: "fail",
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
 				prefix:          "a",
 				suffix:          " ",
@@ -1255,6 +1263,7 @@ func TestSpinner_paintStop(t *testing.T) {
 		{
 			name: "fail_no_char_no_msg",
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
 				prefix:          "a",
 				suffix:          " ",
@@ -1266,6 +1275,7 @@ func TestSpinner_paintStop(t *testing.T) {
 		{
 			name: "fail_no_char_no_msg_dumb_term",
 			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
 				prefix:          "a",
 				suffix:          " ",
@@ -1278,6 +1288,7 @@ func TestSpinner_paintStop(t *testing.T) {
 		{
 			name: "fail_colorall",
 			spinner: &Spinner{
+				buffer:   &bytes.Buffer{},
 				mu:       &sync.Mutex{},
 				prefix:   "a",
 				suffix:   " ",
@@ -1294,6 +1305,7 @@ func TestSpinner_paintStop(t *testing.T) {
 		{
 			name: "fail_colorall_no_char",
 			spinner: &Spinner{
+				buffer:   &bytes.Buffer{},
 				mu:       &sync.Mutex{},
 				prefix:   "a",
 				suffix:   " ",
@@ -1422,6 +1434,7 @@ func TestSpinner_painter(t *testing.T) {
 	frequencyUpdate := make(chan time.Duration, 1)
 
 	spinner := &Spinner{
+		buffer:            &bytes.Buffer{},
 		mu:                &sync.Mutex{},
 		writer:            buf,
 		prefix:            "a",
