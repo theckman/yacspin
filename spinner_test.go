@@ -1561,7 +1561,7 @@ func TestSpinner_painter(t *testing.T) {
 		stopColorFn:       fmt.Sprintf,
 		stopMsg:           "stop",
 		stopChar:          character{Value: "v", Size: 1},
-		frequency:         20 * time.Millisecond,
+		frequency:         400 * time.Millisecond,
 		cancelCh:          cancel,
 		doneCh:            done,
 		dataUpdateCh:      dataUpdate,
@@ -1570,7 +1570,7 @@ func TestSpinner_painter(t *testing.T) {
 
 	go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
 
-	time.Sleep(3 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	spinner.mu.Lock()
 
@@ -1579,7 +1579,7 @@ func TestSpinner_painter(t *testing.T) {
 
 	spinner.mu.Unlock()
 
-	time.Sleep(time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	spinner.unpauseCh, spinner.unpausedCh = make(chan struct{}), make(chan struct{})
 	pause <- struct{}{}
@@ -1597,12 +1597,12 @@ func TestSpinner_painter(t *testing.T) {
 	spinner.mu.Lock()
 
 	spinner.message = "msg"
-	spinner.frequency = 5 * time.Millisecond
-	frequencyUpdate <- 5 * time.Millisecond
+	spinner.frequency = 200 * time.Millisecond
+	frequencyUpdate <- 200 * time.Millisecond
 
 	spinner.mu.Unlock()
 
-	time.Sleep(8 * time.Millisecond)
+	time.Sleep(210 * time.Millisecond)
 
 	cancel <- struct{}{}
 
