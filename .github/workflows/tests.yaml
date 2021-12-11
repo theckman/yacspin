@@ -25,12 +25,5 @@ jobs:
       uses: golangci/golangci-lint-action@v2
     - name: Run tests
       run: 'go test -v ./... -coverprofile="coverage.txt" -covermode=atomic'
-    - name: Upload coverage report
-      uses: codecov/codecov-action@v2
-      with:
-        token: 9b9ef0f3-fd9b-4394-80c2-8f7973b61696
-        files: coverage.txt
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: true
-        verbose: true
+    - name: Print coverage report
+      run: 'go tool cover -func="coverage.txt"'
