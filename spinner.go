@@ -208,7 +208,7 @@ func New(cfg Config) (*Spinner, error) {
 		mu:                &sync.Mutex{},
 		frequency:         cfg.Frequency,
 		status:            uint32Ptr(0),
-		frequencyUpdateCh: make(chan time.Duration),
+		frequencyUpdateCh: make(chan time.Duration), // use unbuffered for now to avoid .Frequency() panic
 		dataUpdateCh:      make(chan struct{}),
 
 		colorAll:        cfg.ColorAll,
@@ -332,16 +332,10 @@ func (s SpinnerStatus) String() string {
 	}
 }
 
-// Status returns the current status of the internal state machine. Returned
-// value is of type SpinnerStatus which has package constants available.
+// Status returns the current status of the spinner. The returned value is of
+// type SpinnerStatus, which can be compared against the exported Spinner*
+// package-level constants (e.g., SpinnerRunning).
 func (s *Spinner) Status() SpinnerStatus {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.status == nil {
-		panic("status field is nil")
-	}
-
 	return SpinnerStatus(atomic.LoadUint32(s.status))
 }
 
@@ -353,15 +347,17 @@ func (s *Spinner) Start() error {
 		return errors.New("spinner already running or shutting down")
 	}
 
-	// we now have atomic guarantees of no other threads starting or running
+	// we now have atomic guarantees of no other goroutines starting or running
 
 	s.mu.Lock()
 
-	s.frequencyUpdateCh = make(chan time.Duration, 1)
+	s.frequencyUpdateCh = make(chan time.Duration, 4)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
 
 	s.mu.Unlock()
 
+	// because of the atomic swap above, we know it's safe to mutate these
+	// values outside of mutex
 	s.doneCh = make(chan struct{})
 	s.pauseCh = make(chan struct{}) // unbuffered since we want this to be synchronous
 
@@ -393,7 +389,7 @@ func (s *Spinner) Pause() error {
 	// set up the channels the painter will use
 	s.unpauseCh, s.unpausedCh = make(chan struct{}), make(chan struct{})
 
-	// inform the painter to pause
+	// inform the painter to pause as a blocking send
 	s.pauseCh <- struct{}{}
 
 	if !atomic.CompareAndSwapUint32(s.status, statusPausing, statusPaused) {
@@ -481,6 +477,8 @@ func (s *Spinner) stop(fail bool) error {
 
 	s.mu.Unlock()
 
+	// because of atomic swaps and channel receive above we know it's
+	// safe to mutate these fields outside of the mutex
 	s.index = 0
 	s.cancelCh = nil
 	s.doneCh = nil
