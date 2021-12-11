@@ -60,14 +60,6 @@ func TestNew(t *testing.T) {
 			err:    "cfg.Frequency must be greater than 0",
 		},
 		{
-			name:     "config_with_delay_and_default_writer",
-			maxWidth: 1,
-			writer:   os.Stdout,
-			cfg: Config{
-				Delay: 100 * time.Millisecond,
-			},
-		},
-		{
 			name:     "config_with_frequency_and_default_writer",
 			maxWidth: 1,
 			writer:   os.Stdout,
@@ -158,14 +150,8 @@ func TestNew(t *testing.T) {
 				t.Fatal("spinner.frequencyUpdateCh is nil")
 			}
 
-			if tt.cfg.Delay > 0 && tt.cfg.Frequency == 0 {
-				if spinner.frequency != tt.cfg.Delay {
-					t.Errorf("spinner.frequency = %s, want %s", spinner.frequency, tt.cfg.Delay)
-				}
-			} else {
-				if spinner.frequency != tt.cfg.Frequency {
-					t.Errorf("spinner.frequency = %s, want %s", spinner.frequency, tt.cfg.Frequency)
-				}
+			if spinner.frequency != tt.cfg.Frequency {
+				t.Errorf("spinner.frequency = %s, want %s", spinner.frequency, tt.cfg.Frequency)
 			}
 
 			if spinner.writer == nil {
@@ -318,47 +304,6 @@ func TestNew_dumbTerm(t *testing.T) {
 	}
 }
 
-func TestSpinner_Active(t *testing.T) {
-	spinner := &Spinner{status: uint32Ptr(statusStopped)}
-
-	tests := []struct {
-		name  string
-		input uint32
-		want  bool
-	}{
-		{
-			name:  "stopped",
-			input: statusStopped,
-			want:  false,
-		},
-		{
-			name:  "starting",
-			input: statusStarting,
-			want:  true,
-		},
-		{
-			name:  "running",
-			input: statusRunning,
-			want:  true,
-		},
-		{
-			name:  "stopping",
-			input: statusStopping,
-			want:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			atomic.StoreUint32(spinner.status, tt.input)
-
-			if got := spinner.Active(); got != tt.want {
-				t.Errorf("got = %t, want %t", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSpinner_Status(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -507,83 +452,6 @@ func TestSpinner_Frequency(t *testing.T) {
 			}
 
 			if cont := testErrCheck(t, "spinner.Frequency()", tt.err, err); !cont {
-				return
-			}
-
-			if cap(tt.ch) == 1 {
-				select {
-				case got, ok := <-tt.ch:
-					if !ok {
-						t.Fatal("channel closed")
-					}
-					if got != tt.input {
-						t.Errorf("channel receive got = %s, want %s", got, tt.input)
-					}
-				default:
-					t.Fatal("notification channel had no messages")
-				}
-			}
-
-			got := spinner.frequency
-			if got != tt.input {
-				t.Errorf("got = %s, want %s", got, tt.input)
-			}
-		})
-	}
-}
-
-func TestSpinner_Delay(t *testing.T) {
-	tests := []struct {
-		name  string
-		input time.Duration
-		ch    chan time.Duration
-		err   string
-	}{
-		{
-			name: "invalid",
-			ch:   make(chan time.Duration, 1),
-			err:  "duration must be greater than 0",
-		},
-		{
-			name:  "assert_non-blocking",
-			input: 42,
-			ch:    make(chan time.Duration, 1),
-		},
-		{
-			name:  "assert_notification",
-			input: 42,
-			ch:    make(chan time.Duration, 1),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer close(tt.ch)
-
-			spinner := &Spinner{
-				mu:                &sync.Mutex{},
-				frequency:         0,
-				frequencyUpdateCh: tt.ch,
-			}
-
-			tmr := time.NewTimer(2 * time.Second)
-			fnch := make(chan struct{})
-
-			var err error
-
-			go func() {
-				defer close(fnch)
-				err = spinner.Delay(tt.input)
-			}()
-
-			select {
-			case <-tmr.C:
-				t.Fatal("function blocked")
-			case <-fnch:
-				tmr.Stop()
-			}
-
-			if cont := testErrCheck(t, "spinner.Delay()", tt.err, err); !cont {
 				return
 			}
 

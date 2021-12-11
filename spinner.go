@@ -85,10 +85,6 @@ type Config struct {
 	// Note: This is a required value (cannot be 0)
 	Frequency time.Duration
 
-	// Delay is deprecated by the Frequency configuration field, with Frequency
-	// taking precedent if both are present.
-	Delay time.Duration
-
 	// Writer is the place where we are outputting the spinner, and can't be
 	// changed on the fly. If omitted, this defaults to os.Stdout.
 	Writer io.Writer
@@ -204,10 +200,6 @@ const (
 
 // New creates a new unstarted spinner.
 func New(cfg Config) (*Spinner, error) {
-	if cfg.Delay > 0 && cfg.Frequency == 0 {
-		cfg.Frequency = cfg.Delay
-	}
-
 	if cfg.Frequency < 1 {
 		return nil, errors.New("cfg.Frequency must be greater than 0")
 	}
@@ -290,16 +282,6 @@ func (s *Spinner) notifyDataChange() {
 	case s.dataUpdateCh <- struct{}{}:
 	default:
 	}
-}
-
-// Active is deprecated and will be removed in a future release. It was replaced
-// by the Status() method.
-//
-// Active returns whether the spinner is active. Active means the spinner is
-// either starting or running.
-func (s *Spinner) Active() bool {
-	v := atomic.LoadUint32(s.status)
-	return v == 1 || v == 2
 }
 
 // SpinnerStatus describes the status of the spinner. See the possible constant
@@ -748,11 +730,6 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 	}
 
 	return fmt.Fprintf(w, "%s%s%s%s", prefix, colorFn(c), suffix, message)
-}
-
-// Delay is deprecated in favor of Frequency.
-func (s *Spinner) Delay(d time.Duration) error {
-	return s.Frequency(d)
 }
 
 // Frequency updates the frequency of the spinner being animated.
