@@ -16,29 +16,43 @@ Because this package adopts the spinner character sets from https://github.com/b
 this package is released under the Apache 2.0 License.
 
 ## Yet Another CLi Spinner?
-The other Go spinner ties the ability to show updated information to the
-spinner's animation, meaning you can't always show all the information you want
-to the end user without changing the animation speed. In addition, there were
-also some API design choices that have made it unsafe for concurrent use, which
-presents challenges when trying to update the text in the spinner while it's
-animating.
+This project was created after it was realized that the most popular spinner
+library for Go had some limitations, that couldn't be fixed without a massive
+overhaul of the API.
 
-There was also an interest in the spinner being able to represent a task, and to
+The other spinner ties the ability to show updated messages to the spinner's
+animation, meaning you can't always show all the information you want to the end
+user without changing the animation speed. This means you need to trade off
+animation aesthetics to show "realtime" information. It was a goal to avoid this
+problem.
+
+In addition, there were also some API design choices that have made it unsafe
+for concurrent use, which presents challenges when trying to update the text in
+the spinner while it's animating. This could result in undefined behavior due to
+data races.
+
+There were also some variable-width spinners in that other project that did
+not render correctly. Because the width of the spinner animation would change,
+so would the position of the message on the screen. `yacspin` uses a dynamic
+width when animating, so your message should appear static relative to the
+animating spinner.
+
+Finally, there was an interest in the spinner being able to represent a task, and to
 indicate whether it failed or was successful. This would have further compounded
-the API issues mentioned above.
+the API changes needed above to support in an intuitive way.
 
 This project takes inspiration from that other project, and takes a new approach
 to address the challenges above.
 
 ## Features
 #### Provided Spinners
-There are over 70 spinners available in the `CharSets` package variable. They
+There are over 80 spinners available in the `CharSets` package variable. They
 were borrowed from [github.com/briandowns/spinner](https://github.com/briandowns/spinner).
-There is a table with all of the spinners [at the bottom of this README](#Spinners).
+There is a table with most of the spinners [at the bottom of this README](#Spinners).
 
 #### Dynamic Width of Animation
 Because of how some spinners are animated, they may have different widths are
-different times in the animation. The spinner calculates the maximum width, and
+different times in the animation. `yacspin` calculates the maximum width, and
 pads the animation to ensure the text's position on the screen doesn't change.
 This results in a smoother looking animation.
 
@@ -52,10 +66,10 @@ This results in a smoother looking animation.
 The spinner has both a `Stop()` and `StopFail()` method, which allows the
 spinner to result in a success message or a failure message. The messages,
 colors, and even the character used to denote success or failure are
-customizable in either the initial config or via the methods.
+customizable in either the initial config or via the spinner's methods.
 
-By doing this you can use the spinner to display the status of a list of tasks
-being executed serially.
+By doing this you can use a single `yacspin` spinner to display the status of a
+list of tasks being executed serially.
 
 ##### Stop
 ![Animation with Success](https://raw.githubusercontent.com/theckman/yacspin-gifs/master/features/stop.gif)
@@ -65,7 +79,7 @@ being executed serially.
 
 #### Concurrency
 The spinner is safe for concurrent use, so you can update any of its settings
-via methods whether the spinner is stopped or is currently running.
+via methods whether the spinner is stopped or is currently animating.
 
 #### Live Updates
 Most spinners tie the ability to show new messages with the animation of the

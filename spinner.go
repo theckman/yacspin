@@ -3,12 +3,18 @@
 // project. Specifically this project borrows the default character sets, and
 // color mappings to github.com/fatih/color colors, from that project.
 //
-// This also supports an alternate mode of operation for Winodws OS and dumb
-// terminals. This is discovered automatically when creating the spinner.
+// This spinner should support all major operating systems, and is tested
+// against Linux, MacOS, and Windows.
+//
+// This spinner also supports an alternate mode of operation when the TERM
+// environment variable is set to "dumb". This is discovered automatically when
+// constructing the spinner.
 //
 // Within the yacspin package there are some default spinners stored in the
-// yacspin.CharSets variable, but you can also provide your own. There is also a
-// list of known colors in the yacspin.ValidColors variable.
+// yacspin.CharSets variable, and you can also provide your own. There is also a
+// list of known colors in the yacspin.ValidColors variable, if you'd like to
+// see what's supported. If you've used github.com/fatih/color before, they
+// should look familiar.
 //
 //		cfg := yacspin.Config{
 //			Frequency:     100 * time.Millisecond,
@@ -83,20 +89,25 @@ type Config struct {
 	// Frequency specifies how often to animate the spinner. Optimal value
 	// depends on the character set you use.
 	//
-	// Note: This is a required value (cannot be 0)
+	// Note: This is a required value (cannot be 0).
 	Frequency time.Duration
 
 	// Writer is the place where we are outputting the spinner, and can't be
-	// changed on the fly. If omitted, this defaults to os.Stdout.
+	// changed after the *Spinner has been constructed. If omitted (nil), this
+	// defaults to os.Stdout.
 	Writer io.Writer
 
-	// HideCursor describes whether the cursor should be hidden by the spinner.
-	// If it is hidden, it will be restored when the spinner stops. This can't
-	// be changed on the fly.
+	// HideCursor describes whether the cursor should be hidden by the spinner
+	// while animating. If it is hidden, it will be restored when the spinner
+	// stops. This can't be changed after the *Spinner has been constructed.
+	//
+	// Please note, if the program crashes or is killed you may need to reset
+	// your terminal for the cursor to appear again.
 	HideCursor bool
 
 	// ColorAll describes whether to color everything (all) or just the spinner
-	// character(s). This cannot be changed.
+	// character(s). This cannot be changed after the *Spinner has been
+	// constructed.
 	ColorAll bool
 
 	// Colors are the colors used for the different printed messages. This
@@ -109,8 +120,9 @@ type Config struct {
 	// Prefix is the string printed immediately before the spinner.
 	Prefix string
 
-	// Suffix is the string printed immediately after the spinner. It's
-	// recommended that this string starts with an space ` ` character.
+	// Suffix is the string printed immediately after the spinner and before the
+	// message. It's recommended that this string starts with an space ` `
+	// character.
 	Suffix string
 
 	// SuffixAutoColon configures whether the spinner adds a colon after the
@@ -130,7 +142,7 @@ type Config struct {
 	StopMessage string
 
 	// StopCharacter is spinner character used when Stop() is called.
-	// Recommended character is ✓.
+	// Recommended character is ✓, and can be more than just one character.
 	StopCharacter string
 
 	// StopColors are the colors used for the Stop() printed line. This respects
@@ -140,8 +152,9 @@ type Config struct {
 	// StopFailMessage is the message used when StopFail() is called.
 	StopFailMessage string
 
-	// StopFailCharacter is the spinner character used when StopFail() is called.
-	// Recommended character is ✗.
+	// StopFailCharacter is the spinner character used when StopFail() is
+	// called. Recommended character is ✗, and can be more than just one
+	// character.
 	StopFailCharacter string
 
 	// StopFailColors are the colors used for the StopFail() printed line. This
@@ -149,9 +162,9 @@ type Config struct {
 	StopFailColors []string
 }
 
-// Spinner is the struct type representing a spinner. It's configured via the
-// Config type, and controlled via its methods. Some configuration can also be
-// updated via methods.
+// Spinner is a type representing an animated CLi terminal spinner. It's
+// configured via the Config struct type, and controlled via its methods. Some
+// of its configuration can also be updated via methods.
 //
 // Note: You need to use New() to construct a *Spinner.
 type Spinner struct {
@@ -287,8 +300,8 @@ func (s *Spinner) notifyDataChange() {
 	}
 }
 
-// SpinnerStatus describes the status of the spinner. See the possible constant
-// values.
+// SpinnerStatus describes the status of the spinner. See the package constants
+// for the list of all possible statuses
 type SpinnerStatus uint32
 
 const (
@@ -310,7 +323,7 @@ const (
 	// SpinnerPaused is a paused spinner
 	SpinnerPaused
 
-	// SpinnerUnpausing is a unpausing spinner
+	// SpinnerUnpausing is an unpausing spinner
 	SpinnerUnpausing
 )
 
@@ -342,7 +355,7 @@ func (s *Spinner) Status() SpinnerStatus {
 	return SpinnerStatus(atomic.LoadUint32(s.status))
 }
 
-// Start begins the spinner on the Writer in the Config provided to New(). Onnly
+// Start begins the spinner on the Writer in the Config provided to New(). Only
 // possible error is if the spinner is already runninng.
 func (s *Spinner) Start() error {
 	// move us to the starting state
@@ -375,8 +388,8 @@ func (s *Spinner) Start() error {
 }
 
 // Pause puts the spinner in a state where it no longer animates or renders
-// updates to data. This function blocks until the spinner's internal goroutine
-// enters a paused state.
+// updates to data. This function blocks until the spinner's internal painting
+// goroutine enters a paused state.
 //
 // If you want to make a few configuration changes and have them to appear at
 // the same time, like changing the suffix, message, and color, you can Pause()
@@ -404,7 +417,7 @@ func (s *Spinner) Pause() error {
 
 // Unpause returns the spinner back to a running state after pausing. See
 // Pause() documentation for more detail. This function blocks until the
-// spinner's internal goroutine acknowledges the request to unpause.
+// spinner's internal painting goroutine acknowledges the request to unpause.
 //
 // If the spinner is not paused this returns an error.
 func (s *Spinner) Unpause() error {
@@ -775,8 +788,8 @@ func (s *Spinner) Prefix(prefix string) {
 	s.notifyDataChange()
 }
 
-// Suffix updates the Suffix after the spinner character. It's recommended that
-// this start with an empty space.
+// Suffix updates the Suffix printed after the spinner character and before the
+// message. It's recommended that this start with an empty space.
 func (s *Spinner) Suffix(suffix string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -786,7 +799,7 @@ func (s *Spinner) Suffix(suffix string) {
 	s.notifyDataChange()
 }
 
-// Message updates the Message displayed after he suffix.
+// Message updates the Message displayed after the suffix.
 func (s *Spinner) Message(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -829,6 +842,9 @@ func (s *Spinner) StopMessage(message string) {
 
 // StopColors updates the colors used for the stop message. See Colors() method
 // documentation for more context.
+//
+// StopFailColors() is the method to control the colors in the failed stop
+// message.
 func (s *Spinner) StopColors(colors ...string) error {
 	colorFn, err := colorFunc(colors...)
 	if err != nil {
@@ -845,8 +861,8 @@ func (s *Spinner) StopColors(colors ...string) error {
 	return nil
 }
 
-// StopCharacter sets the single "character" to use for the spinner. Recommended
-// character is ✓.
+// StopCharacter sets the single "character" to use for the spinner when
+// stopping. Recommended character is ✓.
 func (s *Spinner) StopCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
@@ -890,8 +906,8 @@ func (s *Spinner) StopFailColors(colors ...string) error {
 	return nil
 }
 
-// StopFailCharacter sets the single "character" to use for the spinner. Recommended
-// character is ✗.
+// StopFailCharacter sets the single "character" to use for the spinner when
+// stopping for a failure. Recommended character is ✗.
 func (s *Spinner) StopFailCharacter(char string) {
 	n := runewidth.StringWidth(char)
 
@@ -908,7 +924,7 @@ func (s *Spinner) StopFailCharacter(char string) {
 }
 
 // CharSet updates the set of characters (strings) to use for the spinner. You
-// can provide your own, or use one from the CharSets variable.
+// can provide your own, or use one from the yacspin.CharSets variable.
 //
 // The character sets available in the CharSets variable are from the
 // https://github.com/briandowns/spinner project.
