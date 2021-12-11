@@ -2,7 +2,7 @@
 [![License](https://img.shields.io/github/license/theckman/yacspin.svg)](https://github.com/theckman/yacspin/blob/master/LICENSE)
 [![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat)](https://godoc.org/github.com/theckman/yacspin)
 [![Latest Git Tag](https://img.shields.io/github/tag/theckman/yacspin.svg)](https://github.com/theckman/yacspin/releases)
-[![Travis master Build Status](https://img.shields.io/travis/theckman/yacspin/master.svg?label=TravisCI)](https://travis-ci.org/theckman/yacspin/branches)
+[![GitHub Actions master Build Status](https://github.com/theckman/yacspin/actions/workflows/tests.yaml/badge.svg?branch=master)](https://github.com/theckman/yacspin/actions/workflows/tests.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/theckman/yacspin)](https://goreportcard.com/report/github.com/theckman/yacspin)
 [![Codecov](https://img.shields.io/codecov/c/github/theckman/yacspin)](https://codecov.io/gh/theckman/yacspin)
 
