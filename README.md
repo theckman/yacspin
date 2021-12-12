@@ -110,6 +110,19 @@ want to change a few configuration items via method calls, you can `Pause()` the
 spinner first. After making the changes you can call `Unpause()`, and it will
 continue rendering like normal with the newly applied configuration.
 
+#### Supporting non-TTY Output Targets
+`yacspin` also has native support for non-TTY output targets. This is detected
+automatically within the constructor, or can be specified via the `NotTTY`
+`Config` struct field, and results in a different mode of operation.
+
+Specifically, when this is detected the spinner no longer uses colors, disables
+the automatic spinner animation, and instead only animates the spinner when updating the
+message. In addition, each animation is rendered on a new line instead of
+overwriting the current line.
+
+This should result in human-readable output without any changes needed by
+consumers, even when the system is writing to a non-TTY destination.
+
 ## Usage
 ```
 go get github.com/theckman/yacspin
