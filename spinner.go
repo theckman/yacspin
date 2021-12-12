@@ -49,6 +49,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -56,6 +57,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -182,6 +184,12 @@ type Config struct {
 	// StopFailColors are the colors used for the StopFail() printed line. This
 	// respects the ColorAll field.
 	StopFailColors []string
+
+	// NotTTY tells the spinner that the Writer should not be treated as a TTY.
+	// This results in the animation being disabled, with the animation only
+	// happening whenever the data is updated. This mode also renders each
+	// update on new line, versus reusing the current line.
+	NotTTY bool
 }
 
 // Spinner is a type representing an animated CLi terminal spinner. It's
@@ -196,6 +204,7 @@ type Spinner struct {
 	cursorHidden    bool
 	suffixAutoColon bool
 	isDumbTerm      bool
+	isNotTTY        bool
 	spinnerAtEnd    bool
 
 	status       *uint32
@@ -236,10 +245,15 @@ const (
 	statusUnpausing
 )
 
-// New creates a new unstarted spinner.
+// New creates a new unstarted spinner. If stdout does not appear to be a TTY,
+// this constructor implicitly sets cfg.NotTTY to true.
 func New(cfg Config) (*Spinner, error) {
 	if cfg.Frequency < 1 {
 		return nil, errors.New("cfg.Frequency must be greater than 0")
+	}
+
+	if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+		cfg.NotTTY = true
 	}
 
 	s := &Spinner{
@@ -278,6 +292,11 @@ func New(cfg Config) (*Spinner, error) {
 
 	// can only error if the charset is empty, and we prevent that above
 	_ = s.CharSet(cfg.CharSet)
+
+	if cfg.NotTTY {
+		s.isNotTTY = true
+		s.isDumbTerm = true
+	}
 
 	if cfg.Writer == nil {
 		cfg.Writer = colorable.NewColorableStdout()
@@ -393,6 +412,11 @@ func (s *Spinner) Start() error {
 
 	s.frequencyUpdateCh = make(chan time.Duration, 4)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
+
+	if s.isNotTTY {
+		// hack to prevent the animation from running if not a TTY
+		s.frequency = time.Duration(math.MaxInt64)
+	}
 
 	s.mu.Unlock()
 
@@ -568,14 +592,15 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 		case <-timer.C:
 			lastTick = time.Now()
 
-			s.paintUpdate(timer, false)
+			s.paintUpdate(timer, true)
 
 		case <-pause:
 			<-s.unpauseCh
 			close(s.unpausedCh)
 
 		case <-dataUpdate:
-			s.paintUpdate(timer, true)
+			// if this is not a TTY: animate the spinner on the data update
+			s.paintUpdate(timer, s.isNotTTY)
 
 		case frequency := <-frequencyUpdate:
 			handleFrequencyUpdate(frequency, timer, lastTick)
@@ -592,7 +617,7 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 	}
 }
 
-func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
+func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 	s.mu.Lock()
 
 	p := s.prefix
@@ -603,7 +628,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 	d := s.frequency
 	index := s.index
 
-	if !dataUpdate {
+	if animate {
 		s.index++
 
 		if s.index == len(s.chars) {
@@ -635,7 +660,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 			}
 		}
 
-		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, false, cFn); err != nil {
+		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, false, s.isNotTTY, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 	} else {
@@ -643,7 +668,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, false, fmt.Sprintf)
+		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, false, s.isNotTTY, fmt.Sprintf)
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
@@ -657,7 +682,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 		}
 	}
 
-	if !dataUpdate {
+	if animate {
 		timer.Reset(d)
 	}
 }
@@ -700,7 +725,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 		if c.Size > 0 || len(m) > 0 {
 			// paint the line with a newline as it's the final line
-			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, true, cFn); err != nil {
+			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, true, s.isNotTTY, cFn); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -710,7 +735,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 
 		if c.Size > 0 || len(m) > 0 {
-			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, true, fmt.Sprintf); err != nil {
+			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, true, s.isNotTTY, fmt.Sprintf); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -733,6 +758,10 @@ func erase(w io.Writer) error {
 
 // eraseDumbTerm clears the line on dumb terminals
 func (s *Spinner) eraseDumbTerm(w io.Writer) error {
+	if s.isNotTTY {
+		return nil
+	}
+
 	clear := "\r" + strings.Repeat(" ", s.lastPrintLen) + "\r"
 
 	_, err := fmt.Fprint(w, clear)
@@ -758,7 +787,7 @@ func padChar(char character, maxWidth int) string {
 
 // paint writes a single line to the w, using the provided character, message,
 // and color function
-func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll, spinnerAtEnd, finalPaint bool, colorFn func(format string, a ...interface{}) string) (int, error) {
+func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll, spinnerAtEnd, finalPaint, notTTY bool, colorFn func(format string, a ...interface{}) string) (int, error) {
 	var output string
 
 	switch char.Size {
@@ -797,7 +826,7 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 		output = fmt.Sprintf("%s%s%s%s", prefix, colorFn(c), suffix, message)
 	}
 
-	if finalPaint {
+	if finalPaint || notTTY {
 		output += "\n"
 	}
 
@@ -808,6 +837,10 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 func (s *Spinner) Frequency(d time.Duration) error {
 	if d < 1 {
 		return errors.New("duration must be greater than 0")
+	}
+
+	if s.isNotTTY {
+		return nil
 	}
 
 	s.mu.Lock()

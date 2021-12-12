@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -407,10 +408,11 @@ func TestSpinner_notifyDataChange(t *testing.T) {
 
 func TestSpinner_Frequency(t *testing.T) {
 	tests := []struct {
-		name  string
-		input time.Duration
-		ch    chan time.Duration
-		err   string
+		name     string
+		input    time.Duration
+		isNotTTY bool
+		ch       chan time.Duration
+		err      string
 	}{
 		{
 			name: "invalid",
@@ -427,6 +429,12 @@ func TestSpinner_Frequency(t *testing.T) {
 			input: 42,
 			ch:    make(chan time.Duration, 1),
 		},
+		{
+			name:     "is_not_tty",
+			input:    42,
+			isNotTTY: true,
+			ch:       make(chan time.Duration, 1),
+		},
 	}
 
 	for _, tt := range tests {
@@ -437,6 +445,7 @@ func TestSpinner_Frequency(t *testing.T) {
 				mu:                &sync.Mutex{},
 				frequency:         0,
 				frequencyUpdateCh: tt.ch,
+				isNotTTY:          tt.isNotTTY,
 			}
 
 			tmr := time.NewTimer(2 * time.Second)
@@ -470,13 +479,17 @@ func TestSpinner_Frequency(t *testing.T) {
 						t.Errorf("channel receive got = %s, want %s", got, tt.input)
 					}
 				default:
-					t.Fatal("notification channel had no messages")
+					if !tt.isNotTTY {
+						t.Fatal("notification channel had no messages")
+					}
 				}
 			}
 
-			got := spinner.frequency
-			if got != tt.input {
-				t.Errorf("got = %s, want %s", got, tt.input)
+			if !tt.isNotTTY {
+				got := spinner.frequency
+				if got != tt.input {
+					t.Errorf("got = %s, want %s", got, tt.input)
+				}
 			}
 		})
 	}
@@ -760,6 +773,21 @@ func TestSpinner_Start(t *testing.T) {
 				stopFailMsg:     "stop fail msg",
 			},
 		},
+		{
+			name: "spinner_not_tty",
+			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
+				status:          uint32Ptr(statusStopped),
+				mu:              &sync.Mutex{},
+				frequency:       time.Millisecond,
+				colorFn:         fmt.Sprintf,
+				stopColorFn:     fmt.Sprintf,
+				stopFailColorFn: fmt.Sprintf,
+				stopMsg:         "stop msg",
+				stopFailMsg:     "stop fail msg",
+				isNotTTY:        true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -788,6 +816,10 @@ func TestSpinner_Start(t *testing.T) {
 
 			if buf.Len() == 0 {
 				t.Fatal("painter did not write data")
+			}
+
+			if max := time.Duration(math.MaxInt64); tt.spinner.isNotTTY && tt.spinner.frequency != max {
+				t.Fatalf("tt.spinner.duration = %s, want %s", tt.spinner.frequency, max)
 			}
 		})
 	}
@@ -1164,10 +1196,10 @@ func TestSpinner_paintUpdate(t *testing.T) {
 
 			tm := time.NewTimer(10 * time.Millisecond)
 
-			tt.spinner.paintUpdate(tm, false)
-			tt.spinner.paintUpdate(tm, false)
+			tt.spinner.paintUpdate(tm, true)
 			tt.spinner.paintUpdate(tm, true)
 			tt.spinner.paintUpdate(tm, false)
+			tt.spinner.paintUpdate(tm, true)
 			tm.Stop()
 
 			got := buf.String()
@@ -1494,82 +1526,169 @@ func Test_setToCharSlice(t *testing.T) {
 }
 
 func TestSpinner_painter(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test in short mode.")
-	}
+	t.Run("animated", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping test in short mode.")
+		}
 
-	const want = "\r\033[K\ray msg\r\033[K\ray othermsg\r\033[K\raz msg\r\033[K\ray msg\r\x1b[K\rav stop\n"
+		const want = "\r\033[K\ray msg\r\033[K\ray othermsg\r\033[K\raz msg\r\033[K\ray msg\r\x1b[K\rav stop\n"
 
-	buf := &bytes.Buffer{}
+		buf := &bytes.Buffer{}
 
-	cancel, done, dataUpdate, pause := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
-	frequencyUpdate := make(chan time.Duration, 1)
+		cancel, done, dataUpdate, pause := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+		frequencyUpdate := make(chan time.Duration, 1)
 
-	spinner := &Spinner{
-		buffer:            &bytes.Buffer{},
-		mu:                &sync.Mutex{},
-		writer:            buf,
-		prefix:            "a",
-		message:           "msg",
-		suffix:            " ",
-		maxWidth:          1,
-		colorFn:           fmt.Sprintf,
-		chars:             []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
-		stopColorFn:       fmt.Sprintf,
-		stopMsg:           "stop",
-		stopChar:          character{Value: "v", Size: 1},
-		frequency:         2000 * time.Millisecond,
-		cancelCh:          cancel,
-		doneCh:            done,
-		dataUpdateCh:      dataUpdate,
-		frequencyUpdateCh: frequencyUpdate,
-	}
+		spinner := &Spinner{
+			buffer:            &bytes.Buffer{},
+			mu:                &sync.Mutex{},
+			writer:            buf,
+			prefix:            "a",
+			message:           "msg",
+			suffix:            " ",
+			maxWidth:          1,
+			colorFn:           fmt.Sprintf,
+			chars:             []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+			stopColorFn:       fmt.Sprintf,
+			stopMsg:           "stop",
+			stopChar:          character{Value: "v", Size: 1},
+			frequency:         2000 * time.Millisecond,
+			cancelCh:          cancel,
+			doneCh:            done,
+			dataUpdateCh:      dataUpdate,
+			frequencyUpdateCh: frequencyUpdate,
+		}
 
-	go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
+		go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
 
-	time.Sleep(500 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 
-	spinner.mu.Lock()
+		spinner.mu.Lock()
 
-	spinner.message = "othermsg"
-	spinner.dataUpdateCh <- struct{}{}
+		spinner.message = "othermsg"
+		spinner.dataUpdateCh <- struct{}{}
 
-	spinner.mu.Unlock()
+		spinner.mu.Unlock()
 
-	time.Sleep(500 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 
-	spinner.unpauseCh, spinner.unpausedCh = make(chan struct{}), make(chan struct{})
-	pause <- struct{}{}
+		spinner.unpauseCh, spinner.unpausedCh = make(chan struct{}), make(chan struct{})
+		pause <- struct{}{}
 
-	close(spinner.unpauseCh)
-	_, ok := <-spinner.unpausedCh
+		close(spinner.unpauseCh)
+		_, ok := <-spinner.unpausedCh
 
-	if ok {
-		t.Fatal("unexpected successful channel receive")
-	}
+		if ok {
+			t.Fatal("unexpected successful channel receive")
+		}
 
-	spinner.unpauseCh = nil
-	spinner.unpausedCh = nil
+		spinner.unpauseCh = nil
+		spinner.unpausedCh = nil
 
-	spinner.mu.Lock()
+		spinner.mu.Lock()
 
-	spinner.message = "msg"
-	spinner.frequency = 1000 * time.Millisecond
-	frequencyUpdate <- 1000 * time.Millisecond
+		spinner.message = "msg"
+		spinner.frequency = 1000 * time.Millisecond
+		frequencyUpdate <- 1000 * time.Millisecond
 
-	spinner.mu.Unlock()
+		spinner.mu.Unlock()
 
-	time.Sleep(1200 * time.Millisecond)
+		time.Sleep(1200 * time.Millisecond)
 
-	cancel <- struct{}{}
+		cancel <- struct{}{}
 
-	<-done
+		<-done
 
-	got := buf.String()
+		got := buf.String()
 
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Fatalf("output differs: (-want / +got)\n%s", diff)
-	}
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("output differs: (-want / +got)\n%s", diff)
+		}
+	})
+
+	t.Run("no_tty", func(t *testing.T) {
+		const want = "ay msg\naz othermsg\nay msg\naz msg\nav stop\n"
+
+		buf := &bytes.Buffer{}
+
+		cancel, done, dataUpdate, pause := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+		frequencyUpdate := make(chan time.Duration, 1)
+
+		spinner := &Spinner{
+			buffer:            &bytes.Buffer{},
+			mu:                &sync.Mutex{},
+			writer:            buf,
+			prefix:            "a",
+			message:           "msg",
+			suffix:            " ",
+			maxWidth:          1,
+			colorFn:           fmt.Sprintf,
+			chars:             []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+			stopColorFn:       fmt.Sprintf,
+			stopMsg:           "stop",
+			stopChar:          character{Value: "v", Size: 1},
+			frequency:         time.Duration(math.MaxInt64),
+			cancelCh:          cancel,
+			doneCh:            done,
+			dataUpdateCh:      dataUpdate,
+			frequencyUpdateCh: frequencyUpdate,
+			isNotTTY:          true,
+			isDumbTerm:        true,
+		}
+
+		go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
+
+		time.Sleep(100 * time.Millisecond)
+
+		spinner.mu.Lock()
+
+		spinner.message = "othermsg"
+		spinner.dataUpdateCh <- struct{}{}
+
+		spinner.mu.Unlock()
+
+		time.Sleep(100 * time.Millisecond)
+
+		spinner.unpauseCh, spinner.unpausedCh = make(chan struct{}), make(chan struct{})
+		pause <- struct{}{}
+
+		close(spinner.unpauseCh)
+		_, ok := <-spinner.unpausedCh
+
+		if ok {
+			t.Fatal("unexpected successful channel receive")
+		}
+
+		spinner.unpauseCh = nil
+		spinner.unpausedCh = nil
+
+		spinner.mu.Lock()
+
+		spinner.message = "msg"
+		spinner.dataUpdateCh <- struct{}{}
+
+		spinner.mu.Unlock()
+
+		time.Sleep(100 * time.Millisecond)
+
+		spinner.mu.Lock()
+
+		spinner.message = "msg"
+		spinner.dataUpdateCh <- struct{}{}
+
+		spinner.mu.Unlock()
+
+		time.Sleep(100 * time.Millisecond)
+
+		cancel <- struct{}{}
+
+		<-done
+
+		got := buf.String()
+
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Fatalf("output differs: (-want / +got)\n%s", diff)
+		}
+	})
 }
 
 func TestSpinnerStatus_String(t *testing.T) {
