@@ -77,6 +77,12 @@ list of tasks being executed serially.
 ##### StopFail
 ![Animation with Failure](https://raw.githubusercontent.com/theckman/yacspin-gifs/master/features/stop_fail.gif)
 
+#### Animation At End of Line
+The `SpinnerAtEnd` field of the `Config` struct allows you to specify whether
+the spinner is rendered at the end of the line instead of the beginning. The
+default value (`false`) results in the spinner being rendered at the beginning
+of the line.
+
 #### Concurrency
 The spinner is safe for concurrent use, so you can update any of its settings
 via methods whether the spinner is stopped or is currently animating.
