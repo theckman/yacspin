@@ -114,6 +114,7 @@ func TestNew(t *testing.T) {
 				StopFailMessage:   "test stop fail message",
 				StopFailCharacter: "✗",
 				StopFailColors:    []string{"fgHiRed"},
+				SpinnerAtEnd:      true,
 			},
 		},
 	}
@@ -136,6 +137,10 @@ func TestNew(t *testing.T) {
 
 			if spinner.cursorHidden != tt.cfg.HideCursor {
 				t.Fatalf("spinner.cursorHiddenn = %t, want %t", spinner.cursorHidden, tt.cfg.HideCursor)
+			}
+
+			if spinner.spinnerAtEnd != tt.cfg.SpinnerAtEnd {
+				t.Fatalf("spinner.spinnerAtEnd = %t, want %t", spinner.spinnerAtEnd, tt.cfg.SpinnerAtEnd)
 			}
 
 			if spinner.mu == nil {
@@ -1074,6 +1079,22 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
 		{
+			name: "spinner_no_hide_cursor_spinnerAtEnd",
+			spinner: &Spinner{
+				buffer:       &bytes.Buffer{},
+				mu:           &sync.Mutex{},
+				prefix:       " a",
+				message:      "msg",
+				suffix:       " ",
+				maxWidth:     1,
+				colorFn:      fmt.Sprintf,
+				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:    10,
+				spinnerAtEnd: true,
+			},
+			want: "\r\033[K\rmsg ay \r\033[K\rmsg az \r\033[K\rmsg az \r\033[K\rmsg ay ",
+		},
+		{
 			name: "spinner_no_hide_cursor_auto_cursor",
 			spinner: &Spinner{
 				buffer:          &bytes.Buffer{},
@@ -1151,8 +1172,8 @@ func TestSpinner_paintUpdate(t *testing.T) {
 
 			got := buf.String()
 
-			if got != tt.want {
-				t.Errorf("got = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("output differs: (-want / +got)\n%s", diff)
 			}
 		})
 	}
@@ -1179,6 +1200,39 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopMsg:     "stop",
 			},
 			want: "\r\033[K\rax stop\n",
+		},
+		{
+			name: "ok_spinnerAtEnd",
+			ok:   true,
+			spinner: &Spinner{
+				buffer:       &bytes.Buffer{},
+				mu:           &sync.Mutex{},
+				prefix:       " a",
+				suffix:       " ",
+				maxWidth:     1,
+				stopColorFn:  fmt.Sprintf,
+				spinnerAtEnd: true,
+				stopChar:     character{Value: "x", Size: 1},
+				stopMsg:      "stop",
+			},
+			want: "\r\033[K\rstop ax \n",
+		},
+		{
+			name: "ok_spinnerAtEnd_suffixAutoColon",
+			ok:   true,
+			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
+				mu:              &sync.Mutex{},
+				prefix:          " a",
+				suffix:          " ",
+				maxWidth:        1,
+				stopColorFn:     fmt.Sprintf,
+				spinnerAtEnd:    true,
+				suffixAutoColon: true,
+				stopChar:        character{Value: "x", Size: 1},
+				stopMsg:         "stop",
+			},
+			want: "\r\033[K\rstop ax \n",
 		},
 		{
 			name: "ok_auto_colon",
@@ -1303,6 +1357,24 @@ func TestSpinner_paintStop(t *testing.T) {
 			want: "\r\033[K\rfullColor: ay stop\n",
 		},
 		{
+			name: "fail_colorall_spinnerAtEnd",
+			spinner: &Spinner{
+				buffer:   &bytes.Buffer{},
+				mu:       &sync.Mutex{},
+				prefix:   " a",
+				suffix:   " ",
+				maxWidth: 1,
+				stopFailColorFn: func(format string, a ...interface{}) string {
+					return fmt.Sprintf("fullColor: %s", fmt.Sprintf(format, a...))
+				},
+				stopFailChar: character{Value: "y", Size: 1},
+				stopFailMsg:  "stop",
+				colorAll:     true,
+				spinnerAtEnd: true,
+			},
+			want: "\r\033[K\rfullColor: stop ay \n",
+		},
+		{
 			name: "fail_colorall_no_char",
 			spinner: &Spinner{
 				buffer:   &bytes.Buffer{},
@@ -1330,8 +1402,8 @@ func TestSpinner_paintStop(t *testing.T) {
 
 			got := buf.String()
 
-			if got != tt.want {
-				t.Errorf("got = %#v, want %#v", got, tt.want)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Fatalf("output differs: (-want / +got)\n%s", diff)
 			}
 		})
 	}

@@ -39,6 +39,9 @@
 //		time.Sleep(2 * time.Second)
 //
 //		spinner.Stop()
+//
+// Check out the Config struct to see all of the possible configuration options
+// supported by the Spinner.
 package yacspin
 
 import (
@@ -105,6 +108,11 @@ type Config struct {
 	// your terminal for the cursor to appear again.
 	HideCursor bool
 
+	// SpinnerAtEnd configures the spinner to render the animation at the end of
+	// the line instead of the beginning. The default behavior is to render the
+	// animated spinner at the beginning of the line.
+	SpinnerAtEnd bool
+
 	// ColorAll describes whether to color everything (all) or just the spinner
 	// character(s). This cannot be changed after the *Spinner has been
 	// constructed.
@@ -118,24 +126,38 @@ type Config struct {
 	CharSet []string
 
 	// Prefix is the string printed immediately before the spinner.
+	//
+	// If SpinnerAtEnd is set to true, it's recommended that this string start
+	// with a space character (` `).
 	Prefix string
 
 	// Suffix is the string printed immediately after the spinner and before the
-	// message. It's recommended that this string starts with an space ` `
-	// character.
+	// message.
+	//
+	// If SpinnerAtEnd is set to false, it's recommended that this string starts
+	// with an space character (` `).
 	Suffix string
 
 	// SuffixAutoColon configures whether the spinner adds a colon after the
 	// suffix automatically. If there is a message, a colon followed by a space
 	// is added to the suffix. Otherwise, if there is no message the colon is
 	// omitted.
+	//
+	// If SpinnerAtEnd is set to true, this option is ignored.
 	SuffixAutoColon bool
 
-	// Message is the string printed after the suffix. If a suffix is present,
-	// `: ` is appended to the suffix before printing the message. It results in
-	// a message like:
+	// Message is the message string printed by the spinner. If SpinnerAtEnd is
+	// set to false and SuffixAutoColon is set to true, the printed line will
+	// look like:
 	//
-	// <prefix><spinner><suffix>: <message>
+	//    <prefix><spinner><suffix>: <message>
+	//
+	// If SpinnerAtEnd is set to true, the printed line will instead look like
+	// this:
+	//
+	//    <message><prefix><spinner><suffix>
+	//
+	// In this case, it may be preferred to set the Prefix to empty space (` `).
 	Message string
 
 	// StopMessage is the message used when Stop() is called.
@@ -174,6 +196,7 @@ type Spinner struct {
 	cursorHidden    bool
 	suffixAutoColon bool
 	isDumbTerm      bool
+	spinnerAtEnd    bool
 
 	status       *uint32
 	lastPrintLen int
@@ -229,6 +252,7 @@ func New(cfg Config) (*Spinner, error) {
 
 		colorAll:        cfg.ColorAll,
 		cursorHidden:    cfg.HideCursor,
+		spinnerAtEnd:    cfg.SpinnerAtEnd,
 		suffixAutoColon: cfg.SuffixAutoColon,
 		isDumbTerm:      os.Getenv("TERM") == "dumb",
 		colorFn:         fmt.Sprintf,
@@ -611,7 +635,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 			}
 		}
 
-		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
+		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, false, cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 	} else {
@@ -619,7 +643,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, dataUpdate bool) {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, fmt.Sprintf)
+		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, false, fmt.Sprintf)
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
@@ -676,7 +700,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 		if c.Size > 0 || len(m) > 0 {
 			// paint the line with a newline as it's the final line
-			if _, err := paint(s.buffer, mw, c, p, m+"\n", suf, s.suffixAutoColon, s.colorAll, cFn); err != nil {
+			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, true, cFn); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -686,7 +710,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 
 		if c.Size > 0 || len(m) > 0 {
-			if _, err := paint(s.buffer, mw, c, p, m+"\n", suf, s.suffixAutoColon, false, fmt.Sprintf); err != nil {
+			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, true, fmt.Sprintf); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -734,28 +758,50 @@ func padChar(char character, maxWidth int) string {
 
 // paint writes a single line to the w, using the provided character, message,
 // and color function
-func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll bool, colorFn func(format string, a ...interface{}) string) (int, error) {
-	if char.Size == 0 {
+func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll, spinnerAtEnd, finalPaint bool, colorFn func(format string, a ...interface{}) string) (int, error) {
+	var output string
+
+	switch char.Size {
+	case 0:
 		if colorAll {
-			return fmt.Fprint(w, colorFn(message))
+			output = colorFn(message)
+			break
 		}
 
-		return fmt.Fprint(w, message)
-	}
+		output = message
 
-	c := padChar(char, maxWidth)
+	default:
+		c := padChar(char, maxWidth)
 
-	if suffixAutoColon {
-		if len(suffix) > 0 && len(message) > 0 && message != "\n" {
-			suffix += ": "
+		if spinnerAtEnd {
+			if colorAll {
+				output = colorFn("%s%s%s%s", message, prefix, c, suffix)
+				break
+			}
+
+			output = fmt.Sprintf("%s%s%s%s", message, prefix, colorFn(c), suffix)
+			break
 		}
+
+		if suffixAutoColon { // also implicitly !spinnerAtEnd
+			if len(suffix) > 0 && len(message) > 0 && message != "\n" {
+				suffix += ": "
+			}
+		}
+
+		if colorAll {
+			output = colorFn("%s%s%s%s", prefix, c, suffix, message)
+			break
+		}
+
+		output = fmt.Sprintf("%s%s%s%s", prefix, colorFn(c), suffix, message)
 	}
 
-	if colorAll {
-		return fmt.Fprint(w, colorFn("%s%s%s%s", prefix, c, suffix, message))
+	if finalPaint {
+		output += "\n"
 	}
 
-	return fmt.Fprintf(w, "%s%s%s%s", prefix, colorFn(c), suffix, message)
+	return fmt.Fprint(w, output)
 }
 
 // Frequency updates the frequency of the spinner being animated.
