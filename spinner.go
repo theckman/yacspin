@@ -256,8 +256,11 @@ func New(cfg Config) (*Spinner, error) {
 		cfg.NotTTY = true
 	}
 
+	buf := bytes.NewBuffer(make([]byte, 2048))
+	buf.Reset()
+
 	s := &Spinner{
-		buffer:            bytes.NewBuffer(make([]byte, 2048)),
+		buffer:            buf,
 		mu:                &sync.Mutex{},
 		frequency:         cfg.Frequency,
 		status:            uint32Ptr(0),

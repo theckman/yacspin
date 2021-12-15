@@ -132,6 +132,10 @@ func TestNew(t *testing.T) {
 				t.Fatal("spinner is nil")
 			}
 
+			if n := spinner.buffer.Len(); n != 0 {
+				t.Fatalf("spinner.buffer.Len() = %d, want 0", n)
+			}
+
 			if spinner.colorAll != tt.cfg.ColorAll {
 				t.Fatalf("spinner.colorAll = %t, want %t", spinner.colorAll, tt.cfg.ColorAll)
 			}
