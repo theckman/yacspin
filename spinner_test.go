@@ -96,13 +96,46 @@ func TestNew(t *testing.T) {
 			err: "failed to build stop fail color function: invalid is not a valid color",
 		},
 		{
-			name:     "full_config",
+			name:   "config_with_conflicting_cursor_settings",
+			writer: os.Stdout,
+			cfg: Config{
+				Frequency:  100 * time.Millisecond,
+				ShowCursor: true,
+				HideCursor: true,
+			},
+			err: "cfg.ShowCursor and cfg.HideCursor cannot be true",
+		},
+		{
+			name:     "full_config_with_deprecated_hidden_cursor",
 			writer:   os.Stderr,
 			maxWidth: 3,
 			cfg: Config{
 				Frequency:         100 * time.Millisecond,
 				Writer:            os.Stderr,
 				HideCursor:        true,
+				ColorAll:          true,
+				Colors:            []string{"fgYellow"},
+				CharSet:           CharSets[59],
+				Prefix:            "test prefix: ",
+				Suffix:            " test suffix",
+				Message:           "test message",
+				StopMessage:       "test stop message",
+				StopCharacter:     "✓",
+				StopColors:        []string{"fgGreen"},
+				StopFailMessage:   "test stop fail message",
+				StopFailCharacter: "✗",
+				StopFailColors:    []string{"fgHiRed"},
+				SpinnerAtEnd:      true,
+			},
+		},
+		{
+			name:     "full_config",
+			writer:   os.Stderr,
+			maxWidth: 3,
+			cfg: Config{
+				Frequency:         100 * time.Millisecond,
+				Writer:            os.Stderr,
+				ShowCursor:        true,
 				ColorAll:          true,
 				Colors:            []string{"fgYellow"},
 				CharSet:           CharSets[59],
@@ -140,7 +173,7 @@ func TestNew(t *testing.T) {
 				t.Fatalf("spinner.colorAll = %t, want %t", spinner.colorAll, tt.cfg.ColorAll)
 			}
 
-			if spinner.cursorHidden != tt.cfg.HideCursor {
+			if spinner.cursorHidden != !tt.cfg.ShowCursor {
 				t.Fatalf("spinner.cursorHiddenn = %t, want %t", spinner.cursorHidden, tt.cfg.HideCursor)
 			}
 
