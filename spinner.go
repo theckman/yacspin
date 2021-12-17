@@ -89,7 +89,10 @@ func setToCharSlice(ss []string) ([]character, int) {
 	return c, maxWidth
 }
 
-// Config is the configuration structure for the Spinner.
+// Config is the configuration structure for the Spinner type, which you provide
+// to the New() function. Some of the fields can be updated after the *Spinner
+// is constructed, others can only be set when calling the constructor. Please
+// read the comments for those details.
 type Config struct {
 	// Frequency specifies how often to animate the spinner. Optimal value
 	// depends on the character set you use.
@@ -107,7 +110,7 @@ type Config struct {
 	// spinner stops. This can't be changed after the *Spinner has been
 	// constructed.
 	//
-	// Please note, if you don't show the cursor and the program crashes or is
+	// Please note, if you do not set this to true and the program crashes or is
 	// killed, you may need to reset your terminal for the cursor to appear
 	// again.
 	ShowCursor bool
@@ -204,11 +207,17 @@ type Config struct {
 	NotTTY bool
 }
 
-// Spinner is a type representing an animated CLi terminal spinner. It's
-// configured via the Config struct type, and controlled via its methods. Some
-// of its configuration can also be updated via methods.
+// Spinner is a type representing an animated CLi terminal spinner. The Spinner
+// is constructed by the New() function of this package, which accepts a Config
+// struct as the only argument. Some of the configuration values cannot be
+// changed after the spinner is constructed, so be sure to read the comments
+// within the Config type.
 //
-// Note: You need to use New() to construct a *Spinner.
+// Please note, by default the spinner will hide the terminal cursor when
+// animating the spinner. If you do not set Config.ShowCursor to true, you need
+// to make sure to call the Stop() or StopFail() method to reset the cursor in
+// the terminal. Otherwise, after the program exits the cursor will be hidden
+// and the user will need to `reset` their terminal.
 type Spinner struct {
 	writer          io.Writer
 	buffer          *bytes.Buffer
