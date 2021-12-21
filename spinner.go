@@ -157,8 +157,8 @@ type Config struct {
 
 	// SuffixAutoColon configures whether the spinner adds a colon after the
 	// suffix automatically. If there is a message, a colon followed by a space
-	// is added to the suffix. Otherwise, if there is no message the colon is
-	// omitted.
+	// is added to the suffix. Otherwise, if there is no message, or the suffix
+	// is only space characters, the colon is omitted.
 	//
 	// If SpinnerAtEnd is set to true, this option is ignored.
 	SuffixAutoColon bool
@@ -845,7 +845,7 @@ func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix st
 		}
 
 		if suffixAutoColon { // also implicitly !spinnerAtEnd
-			if len(suffix) > 0 && len(message) > 0 && message != "\n" {
+			if len(strings.TrimSpace(suffix)) > 0 && len(message) > 0 && message != "\n" {
 				suffix += ": "
 			}
 		}

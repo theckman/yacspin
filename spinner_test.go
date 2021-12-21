@@ -1164,7 +1164,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 			want: "\r\033[K\rmsg ay \r\033[K\rmsg az \r\033[K\rmsg az \r\033[K\rmsg ay ",
 		},
 		{
-			name: "spinner_no_hide_cursor_auto_cursor",
+			name: "spinner_no_hide_cursor_auto_cursor_empty_suffix",
 			spinner: &Spinner{
 				buffer:          &bytes.Buffer{},
 				mu:              &sync.Mutex{},
@@ -1177,7 +1177,23 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				frequency:       10,
 				suffixAutoColon: true,
 			},
-			want: "\r\033[K\ray : msg\r\033[K\raz : msg\r\033[K\raz : msg\r\033[K\ray : msg",
+			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
+		},
+		{
+			name: "spinner_no_hide_cursor_auto_cursor_suffix",
+			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				message:         "msg",
+				suffix:          " foo",
+				maxWidth:        1,
+				colorFn:         fmt.Sprintf,
+				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
+				frequency:       10,
+				suffixAutoColon: true,
+			},
+			want: "\r\033[K\ray foo: msg\r\033[K\raz foo: msg\r\033[K\raz foo: msg\r\033[K\ray foo: msg",
 		},
 		{
 			name: "spinner_hide_cursor",
@@ -1304,7 +1320,7 @@ func TestSpinner_paintStop(t *testing.T) {
 			want: "\r\033[K\rstop ax \n",
 		},
 		{
-			name: "ok_auto_colon",
+			name: "ok_auto_colon_empty_suffix",
 			ok:   true,
 			spinner: &Spinner{
 				buffer:          &bytes.Buffer{},
@@ -1317,7 +1333,23 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopMsg:         "stop",
 				suffixAutoColon: true,
 			},
-			want: "\r\033[K\rax : stop\n",
+			want: "\r\033[K\rax stop\n",
+		},
+		{
+			name: "ok_auto_colon_suffix",
+			ok:   true,
+			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
+				mu:              &sync.Mutex{},
+				prefix:          "a",
+				suffix:          " foo",
+				maxWidth:        1,
+				stopColorFn:     fmt.Sprintf,
+				stopChar:        character{Value: "x", Size: 1},
+				stopMsg:         "stop",
+				suffixAutoColon: true,
+			},
+			want: "\r\033[K\rax foo: stop\n",
 		},
 		{
 			name: "ok_auto_colon_no_msg",
