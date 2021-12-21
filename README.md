@@ -132,6 +132,12 @@ Within the `yacspin` package there are some default spinners stored in the
 `yacspin.CharSets` variable, and you can also provide your own. There is also a
 list of known colors in the `yacspin.ValidColors` variable.
 
+### Example
+
+There are runnable examples in the [examples/](https://github.com/theckman/yacspin/tree/master/examples)
+directory, with one simple example and one more advanced one. Here is a quick
+snippet showing usage from a very high level, with error handling omitted:
+
 ```Go
 cfg := yacspin.Config{
 	Frequency:       100 * time.Millisecond,
@@ -146,7 +152,7 @@ cfg := yacspin.Config{
 spinner, err := yacspin.New(cfg)
 // handle the error
 
-spinner.Start()
+err = spinner.Start()
 
 // doing some work
 time.Sleep(2 * time.Second)
@@ -156,7 +162,7 @@ spinner.Message("uploading data")
 // upload...
 time.Sleep(2 * time.Second)
 
-spinner.Stop()
+err = spinner.Stop()
 ```
 
 ## Spinners
