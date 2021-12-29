@@ -1,11 +1,26 @@
-// This file is available under the Apache 2.0 License
-// This file was copied from: https://github.com/briandowns/spinner
+// Copyright (c) 2021 Brian J. Downs
+// Copyright (c) 2019-2021 Tim Heckman
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // Please see the LICENSE file for the copy of the Apache 2.0 License.
+//
+// This file was copied from: https://github.com/briandowns/spinner
 //
 // Modifications:
 //
 // - removed runtime generation of CharSets 37 and 38; made them literals
+// - fixed pipe spinner (32) animation, by adding missing frame
 
 package yacspin
 
@@ -93,4 +108,14 @@ var CharSets = map[int][]string{
 	78: {"⠈⠁", "⠈⠑", "⠈⠱", "⠈⡱", "⢀⡱", "⢄⡱", "⢄⡱", "⢆⡱", "⢎⡱", "⢎⡰", "⢎⡠", "⢎⡀", "⢎⠁", "⠎⠁", "⠊⠁"},
 	79: {"________", "-_______", "_-______", "__-_____", "___-____", "____-___", "_____-__", "______-_", "_______-", "________", "_______-", "______-_", "_____-__", "____-___", "___-____", "__-_____", "_-______", "-_______", "________"},
 	80: {"|_______", "_/______", "__-_____", "___\\____", "____|___", "_____/__", "______-_", "_______\\", "_______|", "______\\_", "_____-__", "____/___", "___|____", "__\\_____", "_-______"},
+	81: {"□", "◱", "◧", "▣", "■"},
+	82: {"□", "◱", "▨", "▩", "■"},
+	83: {"░", "▒", "▓", "█"},
+	84: {"░", "█"},
+	85: {"⚪", "⚫"},
+	86: {"◯", "⬤"},
+	87: {"▱", "▰"},
+	88: {"➊", "➋", "➌", "➍", "➎", "➏", "➐", "➑", "➒", "➓"},
+	89: {"½", "⅓", "⅔", "¼", "¾", "⅛", "⅜", "⅝", "⅞"},
+	90: {"↞", "↟", "↠", "↡"},
 }
