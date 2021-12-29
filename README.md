@@ -46,7 +46,7 @@ to address the challenges above.
 
 ## Features
 #### Provided Spinners
-There are over 80 spinners available in the `CharSets` package variable. They
+There are over 90 spinners available in the `CharSets` package variable. They
 were borrowed from [github.com/briandowns/spinner](https://github.com/briandowns/spinner).
 There is a table with most of the spinners [at the bottom of this README](#Spinners).
 
