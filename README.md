@@ -166,6 +166,11 @@ err = spinner.Stop()
 ```
 
 ## Spinners
+
+The spinner animations below are recorded at a refresh frequency of 200ms. Some
+animations may look better at a different speed, so play around with the
+frequency until you find a value you find aesthetically pleasing.
+
 yacspin.CharSets index | sample gif (Frequency: 200ms)
 -----------------------|------------------------------
 0 | ![0 gif](https://raw.githubusercontent.com/theckman/yacspin-gifs/11953a4f12560eaf4a27054d3adad471eb19193c/spinners/0.gif)
