@@ -442,6 +442,17 @@ func (s *Spinner) Start() error {
 
 	s.mu.Lock()
 
+	if len(s.chars) == 0 {
+		s.mu.Unlock()
+
+		// move us to the stopped state
+		if !atomic.CompareAndSwapUint32(s.status, statusStarting, statusStopped) {
+			panic("atomic invariant encountered")
+		}
+
+		return errors.New("before starting the spinner a CharSet must be set")
+	}
+
 	s.frequencyUpdateCh = make(chan time.Duration, 4)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
 

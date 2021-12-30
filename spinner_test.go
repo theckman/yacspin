@@ -797,6 +797,21 @@ func TestSpinner_Start(t *testing.T) {
 			err: "spinner already running or shutting down",
 		},
 		{
+			name: "empty_CharSet",
+			spinner: &Spinner{
+				buffer:          &bytes.Buffer{},
+				status:          uint32Ptr(statusStopped),
+				mu:              &sync.Mutex{},
+				frequency:       time.Millisecond,
+				colorFn:         fmt.Sprintf,
+				stopColorFn:     fmt.Sprintf,
+				stopFailColorFn: fmt.Sprintf,
+				stopMsg:         "stop msg",
+				stopFailMsg:     "stop fail msg",
+			},
+			err: "before starting the spinner a CharSet must be set",
+		},
+		{
 			name: "spinner",
 			spinner: &Spinner{
 				buffer:          &bytes.Buffer{},
@@ -808,6 +823,21 @@ func TestSpinner_Start(t *testing.T) {
 				stopFailColorFn: fmt.Sprintf,
 				stopMsg:         "stop msg",
 				stopFailMsg:     "stop fail msg",
+				maxWidth:        3,
+				chars: []character{
+					character{
+						Value: ".",
+						Size:  1,
+					},
+					character{
+						Value: "..",
+						Size:  21,
+					},
+					character{
+						Value: "...",
+						Size:  3,
+					},
+				},
 			},
 		},
 		{
@@ -823,6 +853,21 @@ func TestSpinner_Start(t *testing.T) {
 				stopMsg:         "stop msg",
 				stopFailMsg:     "stop fail msg",
 				isNotTTY:        true,
+				maxWidth:        3,
+				chars: []character{
+					character{
+						Value: ".",
+						Size:  1,
+					},
+					character{
+						Value: "..",
+						Size:  21,
+					},
+					character{
+						Value: "...",
+						Size:  3,
+					},
+				},
 			},
 		},
 	}
@@ -831,7 +876,6 @@ func TestSpinner_Start(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			buf := &bytes.Buffer{}
 			tt.spinner.writer = buf
-			_ = tt.spinner.CharSet(CharSets[26])
 
 			err := tt.spinner.Start()
 
