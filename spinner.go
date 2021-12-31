@@ -155,16 +155,6 @@ type Config struct {
 	// again.
 	ShowCursor bool
 
-	// HideCursor describes whether the cursor should be hidden by the spinner
-	// while animating. If it is hidden, it will be restored when the spinner
-	// stops. This can't be changed after the *Spinner has been constructed.
-	//
-	// Please note, if the program crashes or is killed you may need to reset
-	// your terminal for the cursor to appear again.
-	//
-	// Deprecated: use ShowCursor instead.
-	HideCursor bool
-
 	// SpinnerAtEnd configures the spinner to render the animation at the end of
 	// the line instead of the beginning. The default behavior is to render the
 	// animated spinner at the beginning of the line.
@@ -263,16 +253,6 @@ type Config struct {
 	// field is AutomaticMode, the New() function sets field to the value of
 	// ForceNoTTYMode | ForceDumbTerminalMode.
 	TerminalMode TerminalMode
-
-	// NotTTY tells the spinner that the Writer should not be treated as a TTY.
-	// This results in the animation being disabled, with the animation only
-	// happening whenever the data is updated. This mode also renders each
-	// update on new line, versus reusing the current line.
-	//
-	// Deprecated: use TerminalMode field instead by setting it to:
-	// ForceNoTTYMode | ForceDumbTerminalMode. This will be removed in a future
-	// release.
-	NotTTY bool
 }
 
 // Spinner is a type representing an animated CLi terminal spinner. The Spinner
@@ -336,10 +316,6 @@ const (
 // New creates a new unstarted spinner. If stdout does not appear to be a TTY,
 // this constructor implicitly sets cfg.NotTTY to true.
 func New(cfg Config) (*Spinner, error) {
-	if cfg.ShowCursor && cfg.HideCursor {
-		return nil, errors.New("cfg.ShowCursor and cfg.HideCursor cannot be true")
-	}
-
 	if cfg.TerminalMode == 0 {
 		cfg.TerminalMode = AutomaticMode
 	}
@@ -355,15 +331,6 @@ func New(cfg Config) (*Spinner, error) {
 
 	if termModeForceDumb(cfg.TerminalMode) && termModeForceSmart(cfg.TerminalMode) {
 		return nil, errors.New("cfg.TerminalMode cannot have both ForceDumbTerminalMode and ForceSmartTerminalMode flags set")
-	}
-
-	if cfg.HideCursor {
-		cfg.ShowCursor = false
-	}
-
-	// cfg.NotTTY compatibility
-	if cfg.TerminalMode == AutomaticMode && cfg.NotTTY {
-		cfg.TerminalMode = ForceNoTTYMode | ForceDumbTerminalMode
 	}
 
 	// is this a dumb terminal / not a TTY?
