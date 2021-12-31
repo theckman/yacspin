@@ -110,18 +110,26 @@ want to change a few configuration items via method calls, you can `Pause()` the
 spinner first. After making the changes you can call `Unpause()`, and it will
 continue rendering like normal with the newly applied configuration.
 
-#### Supporting non-TTY Output Targets
-`yacspin` also has native support for non-TTY output targets. This is detected
-automatically within the constructor, or can be specified via the `NotTTY`
-`Config` struct field, and results in a different mode of operation.
+#### Supporting Non-Interactive (TTY) Output Targets
+`yacspin` also has native support for non-interactive (TTY) output targets. By
+default this is detected in the constructor, or can be overriden via the
+`TerminalMode` `Config` struct field. When detecting the application is not
+running withn a TTY session, the behavior of the spinner is different.
 
-Specifically, when this is detected the spinner no longer uses colors, disables
-the automatic spinner animation, and instead only animates the spinner when updating the
-message. In addition, each animation is rendered on a new line instead of
-overwriting the current line.
+Specifically, when this is automatically detected the spinner no longer uses
+colors, disables the automatic spinner animation, and instead only animates the
+spinner when updating the message. In addition, each animation is rendered on a
+new line instead of overwriting the current line.
 
 This should result in human-readable output without any changes needed by
 consumers, even when the system is writing to a non-TTY destination.
+
+#### Manually Stepping Animation
+If you'd like to manually animate the spinner, you can do so by setting the
+`TerminalMode` to `ForceNoTTYMode | ForceSmartTerminalMode`. In this mode the
+spinner will still use colors and other text stylings, but the animation only
+happens when data is updated and on individual lines. You can accomplish this by
+calling the `Message()` method with the same used previously.
 
 ## Usage
 ```
