@@ -89,6 +89,48 @@ func setToCharSlice(ss []string) ([]character, int) {
 	return c, maxWidth
 }
 
+// TerminalMode is a type to represent the bit flag controlling the terminal
+// mode of the spinner, accepted as a field on the Config struct. See the
+// comments on the exported constants for more info.
+type TerminalMode uint32
+
+const (
+	// AutomaticMode configures the constructor function to try and determine if
+	// the application using yacspin is being executed within a interactive
+	// (teletype [TTY]) session.
+	AutomaticMode TerminalMode = 1 << iota
+
+	// ForceTTYMode configures the spinner to operate as if it's running within
+	// a TTY session.
+	ForceTTYMode
+
+	// ForceNoTTYMode configures the spinner to operate as if it's not running
+	// within a TTY session. This mode causes the spinner to only animate when
+	// data is being updated. Each animation is rendered on a new line. You can
+	// trigger an animation by calling the Message() method, including with the
+	// last value it was called with.
+	ForceNoTTYMode
+
+	// ForceDumbTerminalMode configures the spinner to operate as if it's
+	// running within a dumb terminal. This means the spinner will not use ANSI
+	// escape sequences to print colors or to erase each line. Line erasure to
+	// animate the spinner is accomplished by overwriting the line with space
+	// characters.
+	ForceDumbTerminalMode
+
+	// ForceSmartTerminalMode configures the spinner to operate as if it's
+	// running within a terminal that supports ANSI escape sequences (VT100).
+	// This includes printing of stylized text, and more better line erasure to
+	// animate the spinner.
+	ForceSmartTerminalMode
+)
+
+func termModeAuto(t TerminalMode) bool       { return t&AutomaticMode > 0 }
+func termModeForceTTY(t TerminalMode) bool   { return t&ForceTTYMode > 0 }
+func termModeForceNoTTY(t TerminalMode) bool { return t&ForceNoTTYMode > 0 }
+func termModeForceDumb(t TerminalMode) bool  { return t&ForceDumbTerminalMode > 0 }
+func termModeForceSmart(t TerminalMode) bool { return t&ForceSmartTerminalMode > 0 }
+
 // Config is the configuration structure for the Spinner type, which you provide
 // to the New() function. Some of the fields can be updated after the *Spinner
 // is constructed, others can only be set when calling the constructor. Please
@@ -96,8 +138,6 @@ func setToCharSlice(ss []string) ([]character, int) {
 type Config struct {
 	// Frequency specifies how often to animate the spinner. Optimal value
 	// depends on the character set you use.
-	//
-	// Note: This is a required value (cannot be 0).
 	Frequency time.Duration
 
 	// Writer is the place where we are outputting the spinner, and can't be
@@ -200,10 +240,38 @@ type Config struct {
 	// respects the ColorAll field.
 	StopFailColors []string
 
+	// TerminalMode is a bitflag field to control how the internal TTY / "dumb
+	// terminal" detection works, to allow consumers to override the internal
+	// behaviors. To set this value, it's recommended to use the TerminalMode
+	// constants exported by this package.
+	//
+	// If not set, the New() function implicitly sets it to AutomaticMode. The
+	// New() function also returns an error if you have conflicting flags, such
+	// as setting ForceTTYMode and ForceNoTTYMode, or if you set AutomaticMode
+	// and any other flags set.
+	//
+	// When in AutomaticMode, the New() function attempts to determine if the
+	// current application is running within an interactive (teletype [TTY])
+	// session. If it does not appear to be within a TTY, it sets this field
+	// value to ForceNoTTYMode | ForceDumbTerminalMode.
+	//
+	// If this does appear to be a TTY, the ForceTTYMode bitflag will bet set.
+	// Similarly, if it's a TTY and the TERM environment variable isn't set to
+	// "dumb" the ForceSmartTerminalMode bitflag will also be set.
+	//
+	// If the deprecated NoTTY Config struct field is set to true, and this
+	// field is AutomaticMode, the New() function sets field to the value of
+	// ForceNoTTYMode | ForceDumbTerminalMode.
+	TerminalMode TerminalMode
+
 	// NotTTY tells the spinner that the Writer should not be treated as a TTY.
 	// This results in the animation being disabled, with the animation only
 	// happening whenever the data is updated. This mode also renders each
 	// update on new line, versus reusing the current line.
+	//
+	// Deprecated: use TerminalMode field instead by setting it to:
+	// ForceNoTTYMode | ForceDumbTerminalMode. This will be removed in a future
+	// release.
 	NotTTY bool
 }
 
@@ -224,8 +292,7 @@ type Spinner struct {
 	colorAll        bool
 	cursorHidden    bool
 	suffixAutoColon bool
-	isDumbTerm      bool
-	isNotTTY        bool
+	termMode        TerminalMode
 	spinnerAtEnd    bool
 
 	status       *uint32
@@ -269,20 +336,50 @@ const (
 // New creates a new unstarted spinner. If stdout does not appear to be a TTY,
 // this constructor implicitly sets cfg.NotTTY to true.
 func New(cfg Config) (*Spinner, error) {
-	if cfg.Frequency < 1 {
-		return nil, errors.New("cfg.Frequency must be greater than 0")
-	}
-
 	if cfg.ShowCursor && cfg.HideCursor {
 		return nil, errors.New("cfg.ShowCursor and cfg.HideCursor cannot be true")
+	}
+
+	if cfg.TerminalMode == 0 {
+		cfg.TerminalMode = AutomaticMode
+	}
+
+	// AutomaticMode flag has been set, but so have others
+	if termModeAuto(cfg.TerminalMode) && cfg.TerminalMode != AutomaticMode {
+		return nil, errors.New("cfg.TerminalMode cannot have AutomaticMode flag set if others are set")
+	}
+
+	if termModeForceTTY(cfg.TerminalMode) && termModeForceNoTTY(cfg.TerminalMode) {
+		return nil, errors.New("cfg.TerminalMode cannot have both ForceTTYMode and ForceNoTTYMode flags set")
+	}
+
+	if termModeForceDumb(cfg.TerminalMode) && termModeForceSmart(cfg.TerminalMode) {
+		return nil, errors.New("cfg.TerminalMode cannot have both ForceDumbTerminalMode and ForceSmartTerminalMode flags set")
 	}
 
 	if cfg.HideCursor {
 		cfg.ShowCursor = false
 	}
 
-	if !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
-		cfg.NotTTY = true
+	// cfg.NotTTY compatibility
+	if cfg.TerminalMode == AutomaticMode && cfg.NotTTY {
+		cfg.TerminalMode = ForceNoTTYMode | ForceDumbTerminalMode
+	}
+
+	// is this a dumb terminal / not a TTY?
+	if cfg.TerminalMode == AutomaticMode && !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd()) {
+		cfg.TerminalMode = ForceNoTTYMode | ForceDumbTerminalMode
+	}
+
+	// if cfg.TerminalMode is still equal to AutomaticMode, this is a TTY
+	if cfg.TerminalMode == AutomaticMode {
+		cfg.TerminalMode = ForceTTYMode
+
+		if os.Getenv("TERM") == "dumb" {
+			cfg.TerminalMode |= ForceDumbTerminalMode
+		} else {
+			cfg.TerminalMode |= ForceSmartTerminalMode
+		}
 	}
 
 	buf := bytes.NewBuffer(make([]byte, 2048))
@@ -300,7 +397,7 @@ func New(cfg Config) (*Spinner, error) {
 		cursorHidden:    !cfg.ShowCursor,
 		spinnerAtEnd:    cfg.SpinnerAtEnd,
 		suffixAutoColon: cfg.SuffixAutoColon,
-		isDumbTerm:      os.Getenv("TERM") == "dumb",
+		termMode:        cfg.TerminalMode,
 		colorFn:         fmt.Sprintf,
 		stopColorFn:     fmt.Sprintf,
 		stopFailColorFn: fmt.Sprintf,
@@ -325,9 +422,9 @@ func New(cfg Config) (*Spinner, error) {
 	// can only error if the charset is empty, and we prevent that above
 	_ = s.CharSet(cfg.CharSet)
 
-	if cfg.NotTTY {
-		s.isNotTTY = true
-		s.isDumbTerm = true
+	if termModeForceNoTTY(s.termMode) {
+		// hack to prevent the animation from running if not a TTY
+		s.frequency = time.Duration(math.MaxInt64)
 	}
 
 	if cfg.Writer == nil {
@@ -442,6 +539,10 @@ func (s *Spinner) Start() error {
 
 	s.mu.Lock()
 
+	if s.frequency < 1 && termModeForceTTY(s.termMode) {
+		return errors.New("spinner Frequency duration must be greater than 0 when used within a TTY")
+	}
+
 	if len(s.chars) == 0 {
 		s.mu.Unlock()
 
@@ -455,11 +556,6 @@ func (s *Spinner) Start() error {
 
 	s.frequencyUpdateCh = make(chan time.Duration, 4)
 	s.dataUpdateCh, s.cancelCh = make(chan struct{}, 1), make(chan struct{}, 1)
-
-	if s.isNotTTY {
-		// hack to prevent the animation from running if not a TTY
-		s.frequency = time.Duration(math.MaxInt64)
-	}
 
 	s.mu.Unlock()
 
@@ -643,7 +739,7 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 
 		case <-dataUpdate:
 			// if this is not a TTY: animate the spinner on the data update
-			s.paintUpdate(timer, s.isNotTTY)
+			s.paintUpdate(timer, termModeForceNoTTY(s.termMode))
 
 		case frequency := <-frequencyUpdate:
 			handleFrequencyUpdate(frequency, timer, lastTick)
@@ -692,7 +788,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 
 	defer s.buffer.Reset()
 
-	if !s.isDumbTerm {
+	if termModeForceSmart(s.termMode) {
 		if err := erase(s.buffer); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
@@ -703,7 +799,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 			}
 		}
 
-		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, false, s.isNotTTY, cFn); err != nil {
+		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, false, termModeForceNoTTY(s.termMode), cFn); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 	} else {
@@ -711,7 +807,7 @@ func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, false, s.isNotTTY, fmt.Sprintf)
+		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, false, termModeForceNoTTY(s.termMode), fmt.Sprintf)
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
@@ -755,7 +851,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 	defer s.buffer.Reset()
 
-	if !s.isDumbTerm {
+	if termModeForceSmart(s.termMode) {
 		if err := erase(s.buffer); err != nil {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
@@ -768,7 +864,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 
 		if c.Size > 0 || len(m) > 0 {
 			// paint the line with a newline as it's the final line
-			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, true, s.isNotTTY, cFn); err != nil {
+			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, true, termModeForceNoTTY(s.termMode), cFn); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -778,7 +874,7 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 
 		if c.Size > 0 || len(m) > 0 {
-			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, true, s.isNotTTY, fmt.Sprintf); err != nil {
+			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, true, termModeForceNoTTY(s.termMode), fmt.Sprintf); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -801,7 +897,9 @@ func erase(w io.Writer) error {
 
 // eraseDumbTerm clears the line on dumb terminals
 func (s *Spinner) eraseDumbTerm(w io.Writer) error {
-	if s.isNotTTY {
+	if termModeForceNoTTY(s.termMode) {
+		// non-TTY outputs use \n instead of line erasure,
+		// so return early
 		return nil
 	}
 
@@ -882,7 +980,9 @@ func (s *Spinner) Frequency(d time.Duration) error {
 		return errors.New("duration must be greater than 0")
 	}
 
-	if s.isNotTTY {
+	if termModeForceNoTTY(s.termMode) {
+		// when output target is not a TTY, we don't animate spinner
+		// so there is no need to update the frequency
 		return nil
 	}
 

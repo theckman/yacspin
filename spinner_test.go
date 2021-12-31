@@ -17,6 +17,8 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+const termModeTTY = ForceTTYMode | ForceSmartTerminalMode
+
 // testErrCheck looks to see if errContains is a substring of err.Error(). If
 // not, this calls t.Fatal(). It also calls t.Fatal() if there was an error, but
 // errContains is empty. Returns true if you should continue running the test,
@@ -48,24 +50,21 @@ func testErrCheck(t *testing.T, name string, errContains string, err error) bool
 
 func TestNew(t *testing.T) {
 	tests := []struct {
-		name     string
-		writer   io.Writer
-		maxWidth int
-		cfg      Config
-		charSet  []character
-		err      string
+		name         string
+		writer       io.Writer
+		maxWidth     int
+		overrideFreq time.Duration
+		cfg          Config
+		charSet      []character
+		err          string
 	}{
-		{
-			name:   "empty_config",
-			writer: os.Stdout,
-			err:    "cfg.Frequency must be greater than 0",
-		},
 		{
 			name:     "config_with_frequency_and_default_writer",
 			maxWidth: 1,
 			writer:   os.Stdout,
 			cfg: Config{
-				Frequency: 100 * time.Millisecond,
+				Frequency:    100 * time.Millisecond,
+				TerminalMode: termModeTTY,
 			},
 		},
 		{
@@ -106,6 +105,30 @@ func TestNew(t *testing.T) {
 			err: "cfg.ShowCursor and cfg.HideCursor cannot be true",
 		},
 		{
+			name: "config_with_conflicting_TerminalMode_Auto",
+			cfg: Config{
+				Frequency:    100 * time.Millisecond,
+				TerminalMode: AutomaticMode | ForceTTYMode,
+			},
+			err: "cfg.TerminalMode cannot have AutomaticMode flag set if others are set",
+		},
+		{
+			name: "config_with_conflicting_TerminalMode_TTY",
+			cfg: Config{
+				Frequency:    100 * time.Millisecond,
+				TerminalMode: ForceTTYMode | ForceNoTTYMode,
+			},
+			err: "cfg.TerminalMode cannot have both ForceTTYMode and ForceNoTTYMode flags set",
+		},
+		{
+			name: "config_with_conflicting_TerminalMode_Term",
+			cfg: Config{
+				Frequency:    100 * time.Millisecond,
+				TerminalMode: ForceDumbTerminalMode | ForceSmartTerminalMode,
+			},
+			err: "cfg.TerminalMode cannot have both ForceDumbTerminalMode and ForceSmartTerminalMode flags set",
+		},
+		{
 			name:     "full_config_with_deprecated_hidden_cursor",
 			writer:   os.Stderr,
 			maxWidth: 3,
@@ -126,6 +149,7 @@ func TestNew(t *testing.T) {
 				StopFailCharacter: "✗",
 				StopFailColors:    []string{"fgHiRed"},
 				SpinnerAtEnd:      true,
+				TerminalMode:      termModeTTY,
 			},
 		},
 		{
@@ -149,6 +173,19 @@ func TestNew(t *testing.T) {
 				StopFailCharacter: "✗",
 				StopFailColors:    []string{"fgHiRed"},
 				SpinnerAtEnd:      true,
+				TerminalMode:      termModeTTY,
+			},
+		},
+		{
+			name:         "not_tty",
+			writer:       os.Stderr,
+			maxWidth:     3,
+			overrideFreq: 9223372036854775807,
+			cfg: Config{
+				Frequency: 100 * time.Millisecond,
+				Writer:    os.Stderr,
+				CharSet:   CharSets[59],
+				NotTTY:    true,
 			},
 		},
 	}
@@ -193,8 +230,14 @@ func TestNew(t *testing.T) {
 				t.Fatal("spinner.frequencyUpdateCh is nil")
 			}
 
-			if spinner.frequency != tt.cfg.Frequency {
-				t.Errorf("spinner.frequency = %s, want %s", spinner.frequency, tt.cfg.Frequency)
+			if tt.overrideFreq > 0 {
+				if spinner.frequency != tt.overrideFreq {
+					t.Errorf("spinner.frequency = %d (%s), want %d (%s)", spinner.frequency, spinner.frequency, tt.overrideFreq, tt.overrideFreq)
+				}
+			} else {
+				if spinner.frequency != tt.cfg.Frequency {
+					t.Errorf("spinner.frequency = %d (%s), want %d (%s)", spinner.frequency, spinner.frequency, tt.cfg.Frequency, tt.cfg.Frequency)
+				}
 			}
 
 			if spinner.writer == nil {
@@ -219,6 +262,16 @@ func TestNew(t *testing.T) {
 
 			if spinner.stopMsg != tt.cfg.StopMessage {
 				t.Errorf("spinner.stopMsg = %q, want %q", spinner.stopMsg, tt.cfg.StopMessage)
+			}
+
+			if tt.cfg.NotTTY {
+				if spinner.termMode != ForceDumbTerminalMode|ForceNoTTYMode {
+					t.Error("spinner.termMode != ForceDumbTerminalMode | ForceNoTTYMode")
+				}
+
+				if d := time.Duration(math.MaxInt64); spinner.frequency != d {
+					t.Errorf("spinner.frequency = %d (%s), want %d (%s)", spinner.frequency, spinner.frequency, d, d)
+				}
 			}
 
 			sc := character{Value: tt.cfg.StopCharacter, Size: runewidth.StringWidth(tt.cfg.StopCharacter)}
@@ -342,8 +395,8 @@ func TestNew_dumbTerm(t *testing.T) {
 	spinner, err := New(cfg)
 	testErrCheck(t, "New()", "", err)
 
-	if !spinner.isDumbTerm {
-		t.Fatal("spinner.isDumbTerm = false, want true")
+	if !termModeForceDumb(spinner.termMode) {
+		t.Fatal("spinner.termMode does not contain ForceDumbTerminalMode flag")
 	}
 }
 
@@ -482,7 +535,10 @@ func TestSpinner_Frequency(t *testing.T) {
 				mu:                &sync.Mutex{},
 				frequency:         0,
 				frequencyUpdateCh: tt.ch,
-				isNotTTY:          tt.isNotTTY,
+			}
+
+			if tt.isNotTTY {
+				spinner.termMode = ForceDumbTerminalMode | ForceNoTTYMode
 			}
 
 			tmr := time.NewTimer(2 * time.Second)
@@ -785,6 +841,19 @@ func TestSpinner_Start(t *testing.T) {
 		err string
 	}{
 		{
+			name: "invalid_frequency_when_tty",
+			spinner: &Spinner{
+				status:          uint32Ptr(statusStopped),
+				mu:              &sync.Mutex{},
+				frequency:       0,
+				colorFn:         fmt.Sprintf,
+				stopColorFn:     fmt.Sprintf,
+				stopFailColorFn: fmt.Sprintf,
+				termMode:        ForceTTYMode,
+			},
+			err: "spinner Frequency duration must be greater than 0 when used within a TTY",
+		},
+		{
 			name: "running_spinner",
 			spinner: &Spinner{
 				status:          uint32Ptr(statusRunning),
@@ -846,13 +915,13 @@ func TestSpinner_Start(t *testing.T) {
 				buffer:          &bytes.Buffer{},
 				status:          uint32Ptr(statusStopped),
 				mu:              &sync.Mutex{},
-				frequency:       time.Millisecond,
+				frequency:       9223372036854775807,
 				colorFn:         fmt.Sprintf,
 				stopColorFn:     fmt.Sprintf,
 				stopFailColorFn: fmt.Sprintf,
 				stopMsg:         "stop msg",
 				stopFailMsg:     "stop fail msg",
-				isNotTTY:        true,
+				termMode:        ForceNoTTYMode,
 				maxWidth:        3,
 				chars: []character{
 					character{
@@ -899,7 +968,7 @@ func TestSpinner_Start(t *testing.T) {
 				t.Fatal("painter did not write data")
 			}
 
-			if max := time.Duration(math.MaxInt64); tt.spinner.isNotTTY && tt.spinner.frequency != max {
+			if max := time.Duration(math.MaxInt64); termModeForceNoTTY(tt.spinner.termMode) && tt.spinner.frequency != max {
 				t.Fatalf("tt.spinner.duration = %s, want %s", tt.spinner.frequency, max)
 			}
 		})
@@ -1188,6 +1257,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				colorFn:   fmt.Sprintf,
 				chars:     []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				frequency: 10,
+				termMode:  termModeTTY,
 			},
 			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
@@ -1204,6 +1274,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				frequency:    10,
 				spinnerAtEnd: true,
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\rmsg ay \r\033[K\rmsg az \r\033[K\rmsg az \r\033[K\rmsg ay ",
 		},
@@ -1220,6 +1291,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				frequency:       10,
 				suffixAutoColon: true,
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\ray msg\r\033[K\raz msg\r\033[K\raz msg\r\033[K\ray msg",
 		},
@@ -1236,6 +1308,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				chars:           []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				frequency:       10,
 				suffixAutoColon: true,
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\ray foo: msg\r\033[K\raz foo: msg\r\033[K\raz foo: msg\r\033[K\ray foo: msg",
 		},
@@ -1252,6 +1325,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				colorFn:      fmt.Sprintf,
 				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				frequency:    10,
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\r\r\033[?25l\ray msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\raz msg\r\033[K\r\r\033[?25l\ray msg",
 		},
@@ -1268,7 +1342,8 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				colorFn:      fmt.Sprintf,
 				chars:        []character{{Value: "y", Size: 1}, {Value: "z", Size: 1}},
 				frequency:    10,
-				isDumbTerm:   true,
+				// TODO(theckman): verify
+				termMode: ForceDumbTerminalMode,
 			},
 			want: "\r\ray msg\r      \raz msg\r      \raz msg\r      \ray msg",
 		},
@@ -1281,6 +1356,7 @@ func TestSpinner_paintUpdate(t *testing.T) {
 				colorFn:   fmt.Sprintf,
 				chars:     []character{{Value: "", Size: 0}},
 				frequency: 10,
+				termMode:  termModeTTY,
 			},
 			want: "\r\033[K\r\r\033[K\r\r\033[K\r\r\033[K\r",
 		},
@@ -1327,6 +1403,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopColorFn: fmt.Sprintf,
 				stopChar:    character{Value: "x", Size: 1},
 				stopMsg:     "stop",
+				termMode:    termModeTTY,
 			},
 			want: "\r\033[K\rax stop\n",
 		},
@@ -1343,6 +1420,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				spinnerAtEnd: true,
 				stopChar:     character{Value: "x", Size: 1},
 				stopMsg:      "stop",
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\rstop ax \n",
 		},
@@ -1360,6 +1438,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				suffixAutoColon: true,
 				stopChar:        character{Value: "x", Size: 1},
 				stopMsg:         "stop",
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\rstop ax \n",
 		},
@@ -1376,6 +1455,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopChar:        character{Value: "x", Size: 1},
 				stopMsg:         "stop",
 				suffixAutoColon: true,
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\rax stop\n",
 		},
@@ -1392,6 +1472,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopChar:        character{Value: "x", Size: 1},
 				stopMsg:         "stop",
 				suffixAutoColon: true,
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\rax foo: stop\n",
 		},
@@ -1408,6 +1489,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopChar:        character{Value: "x", Size: 1},
 				stopMsg:         "",
 				suffixAutoColon: true,
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\rax \n",
 		},
@@ -1424,6 +1506,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopColorFn:  fmt.Sprintf,
 				stopChar:     character{Value: "x", Size: 1},
 				stopMsg:      "stop",
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\r\r\033[?25h\rax stop\n",
 		},
@@ -1440,7 +1523,8 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopColorFn:  fmt.Sprintf,
 				stopChar:     character{Value: "x", Size: 1},
 				stopMsg:      "stop",
-				isDumbTerm:   true,
+				// TODO(theckman): verify
+				termMode:     ForceDumbTerminalMode,
 				lastPrintLen: 10,
 			},
 			want: "\r          \rax stop\n",
@@ -1456,6 +1540,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopFailColorFn: fmt.Sprintf,
 				stopFailChar:    character{Value: "y", Size: 1},
 				stopFailMsg:     "stop",
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\ray stop\n",
 		},
@@ -1468,18 +1553,20 @@ func TestSpinner_paintStop(t *testing.T) {
 				suffix:          " ",
 				maxWidth:        1,
 				stopFailColorFn: fmt.Sprintf,
+				termMode:        termModeTTY,
 			},
 			want: "\r\033[K\r",
 		},
 		{
 			name: "fail_no_char_no_msg_dumb_term",
 			spinner: &Spinner{
-				buffer:          &bytes.Buffer{},
-				mu:              &sync.Mutex{},
-				prefix:          "a",
-				suffix:          " ",
-				maxWidth:        1,
-				isDumbTerm:      true,
+				buffer:   &bytes.Buffer{},
+				mu:       &sync.Mutex{},
+				prefix:   "a",
+				suffix:   " ",
+				maxWidth: 1,
+				// TODO(theckman): verify
+				termMode:        ForceDumbTerminalMode,
 				stopFailColorFn: fmt.Sprintf,
 			},
 			want: "\r\r",
@@ -1498,6 +1585,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopFailChar: character{Value: "y", Size: 1},
 				stopFailMsg:  "stop",
 				colorAll:     true,
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\rfullColor: ay stop\n",
 		},
@@ -1516,6 +1604,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopFailMsg:  "stop",
 				colorAll:     true,
 				spinnerAtEnd: true,
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\rfullColor: stop ay \n",
 		},
@@ -1533,6 +1622,7 @@ func TestSpinner_paintStop(t *testing.T) {
 				stopFailChar: character{Value: "", Size: 0},
 				stopFailMsg:  "stop",
 				colorAll:     true,
+				termMode:     termModeTTY,
 			},
 			want: "\r\033[K\rfullColor: stop\n",
 		},
@@ -1669,6 +1759,7 @@ func TestSpinner_painter(t *testing.T) {
 			doneCh:            done,
 			dataUpdateCh:      dataUpdate,
 			frequencyUpdateCh: frequencyUpdate,
+			termMode:          termModeTTY,
 		}
 
 		go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
@@ -1744,8 +1835,7 @@ func TestSpinner_painter(t *testing.T) {
 			doneCh:            done,
 			dataUpdateCh:      dataUpdate,
 			frequencyUpdateCh: frequencyUpdate,
-			isNotTTY:          true,
-			isDumbTerm:        true,
+			termMode:          ForceDumbTerminalMode | ForceNoTTYMode,
 		}
 
 		go spinner.painter(cancel, dataUpdate, pause, done, frequencyUpdate)
