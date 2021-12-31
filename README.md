@@ -51,7 +51,7 @@ were borrowed from [github.com/briandowns/spinner](https://github.com/briandowns
 There is a table with most of the spinners [at the bottom of this README](#Spinners).
 
 #### Dynamic Width of Animation
-Because of how some spinners are animated, they may have different widths are
+Because of how some spinners are animated, they may have different widths at
 different times in the animation. `yacspin` calculates the maximum width, and
 pads the animation to ensure the text's position on the screen doesn't change.
 This results in a smoother looking animation.
