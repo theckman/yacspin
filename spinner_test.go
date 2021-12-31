@@ -95,16 +95,6 @@ func TestNew(t *testing.T) {
 			err: "failed to build stop fail color function: invalid is not a valid color",
 		},
 		{
-			name:   "config_with_conflicting_cursor_settings",
-			writer: os.Stdout,
-			cfg: Config{
-				Frequency:  100 * time.Millisecond,
-				ShowCursor: true,
-				HideCursor: true,
-			},
-			err: "cfg.ShowCursor and cfg.HideCursor cannot be true",
-		},
-		{
 			name: "config_with_conflicting_TerminalMode_Auto",
 			cfg: Config{
 				Frequency:    100 * time.Millisecond,
@@ -127,30 +117,6 @@ func TestNew(t *testing.T) {
 				TerminalMode: ForceDumbTerminalMode | ForceSmartTerminalMode,
 			},
 			err: "cfg.TerminalMode cannot have both ForceDumbTerminalMode and ForceSmartTerminalMode flags set",
-		},
-		{
-			name:     "full_config_with_deprecated_hidden_cursor",
-			writer:   os.Stderr,
-			maxWidth: 3,
-			cfg: Config{
-				Frequency:         100 * time.Millisecond,
-				Writer:            os.Stderr,
-				HideCursor:        true,
-				ColorAll:          true,
-				Colors:            []string{"fgYellow"},
-				CharSet:           CharSets[59],
-				Prefix:            "test prefix: ",
-				Suffix:            " test suffix",
-				Message:           "test message",
-				StopMessage:       "test stop message",
-				StopCharacter:     "✓",
-				StopColors:        []string{"fgGreen"},
-				StopFailMessage:   "test stop fail message",
-				StopFailCharacter: "✗",
-				StopFailColors:    []string{"fgHiRed"},
-				SpinnerAtEnd:      true,
-				TerminalMode:      termModeTTY,
-			},
 		},
 		{
 			name:     "full_config",
@@ -177,15 +143,27 @@ func TestNew(t *testing.T) {
 			},
 		},
 		{
-			name:         "not_tty",
+			name:         "terminal_mode_no_tty_mode",
 			writer:       os.Stderr,
 			maxWidth:     3,
 			overrideFreq: 9223372036854775807,
 			cfg: Config{
-				Frequency: 100 * time.Millisecond,
-				Writer:    os.Stderr,
-				CharSet:   CharSets[59],
-				NotTTY:    true,
+				Frequency:    100 * time.Millisecond,
+				Writer:       os.Stderr,
+				CharSet:      CharSets[59],
+				TerminalMode: ForceNoTTYMode,
+			},
+		},
+		{
+			name:         "terminal_mode_value",
+			writer:       os.Stderr,
+			maxWidth:     3,
+			overrideFreq: 100 * time.Millisecond,
+			cfg: Config{
+				Frequency:    100 * time.Millisecond,
+				Writer:       os.Stderr,
+				CharSet:      CharSets[59],
+				TerminalMode: ForceTTYMode | ForceSmartTerminalMode,
 			},
 		},
 	}
@@ -211,11 +189,21 @@ func TestNew(t *testing.T) {
 			}
 
 			if spinner.cursorHidden != !tt.cfg.ShowCursor {
-				t.Fatalf("spinner.cursorHiddenn = %t, want %t", spinner.cursorHidden, tt.cfg.HideCursor)
+				t.Fatalf("spinner.cursorHiddenn = %t, want %t", spinner.cursorHidden, tt.cfg.ShowCursor)
 			}
 
 			if spinner.spinnerAtEnd != tt.cfg.SpinnerAtEnd {
 				t.Fatalf("spinner.spinnerAtEnd = %t, want %t", spinner.spinnerAtEnd, tt.cfg.SpinnerAtEnd)
+			}
+
+			if tt.cfg.TerminalMode == 0 || tt.cfg.TerminalMode == AutomaticMode {
+				if v := ForceNoTTYMode | ForceDumbTerminalMode; spinner.termMode != v {
+					t.Fatalf("spinner.termMode = %08b, want %08b", spinner.termMode, v)
+				}
+			} else {
+				if spinner.termMode != tt.cfg.TerminalMode {
+					t.Fatalf("spinner.termMode = %08b, want %08b", spinner.termMode, tt.cfg.TerminalMode)
+				}
 			}
 
 			if spinner.mu == nil {
@@ -262,16 +250,6 @@ func TestNew(t *testing.T) {
 
 			if spinner.stopMsg != tt.cfg.StopMessage {
 				t.Errorf("spinner.stopMsg = %q, want %q", spinner.stopMsg, tt.cfg.StopMessage)
-			}
-
-			if tt.cfg.NotTTY {
-				if spinner.termMode != ForceDumbTerminalMode|ForceNoTTYMode {
-					t.Error("spinner.termMode != ForceDumbTerminalMode | ForceNoTTYMode")
-				}
-
-				if d := time.Duration(math.MaxInt64); spinner.frequency != d {
-					t.Errorf("spinner.frequency = %d (%s), want %d (%s)", spinner.frequency, spinner.frequency, d, d)
-				}
 			}
 
 			sc := character{Value: tt.cfg.StopCharacter, Size: runewidth.StringWidth(tt.cfg.StopCharacter)}
@@ -388,7 +366,6 @@ func TestNew_dumbTerm(t *testing.T) {
 		Message:       "exporting data to file",
 		StopCharacter: "✓",
 		StopColors:    []string{"fgGreen"},
-		HideCursor:    true,
 		ColorAll:      true,
 	}
 
