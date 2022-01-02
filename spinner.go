@@ -153,6 +153,8 @@ type Config struct {
 	// Please note, if you do not set this to true and the program crashes or is
 	// killed, you may need to reset your terminal for the cursor to appear
 	// again.
+	//
+	// This field replaced the now removed HideCursor field.
 	ShowCursor bool
 
 	// SpinnerAtEnd configures the spinner to render the animation at the end of
@@ -249,9 +251,7 @@ type Config struct {
 	// Similarly, if it's a TTY and the TERM environment variable isn't set to
 	// "dumb" the ForceSmartTerminalMode bitflag will also be set.
 	//
-	// If the deprecated NoTTY Config struct field is set to true, and this
-	// field is AutomaticMode, the New() function sets field to the value of
-	// ForceNoTTYMode | ForceDumbTerminalMode.
+	// This field replaced the now removed NotTTY field.
 	TerminalMode TerminalMode
 }
 
