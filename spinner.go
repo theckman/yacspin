@@ -724,16 +724,16 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 }
 
 type paintOp struct {
-	writer          io.Writer
-	maxWidth        int
-	char            character
+	writer          io.Writer // output; should be *Spinner.buffer not .writer
+	maxWidth        int       // max width of all spinner frames
+	char            character // current spinner frame
 	prefix          string
 	message         string
 	suffix          string
 	suffixAutoColon bool
 	colorAll        bool
 	spinnerAtEnd    bool
-	finalPaint      bool
+	finalPaint      bool // is this the final paint [paintStop()]?
 	notTTY          bool
 	colorFn         func(format string, a ...interface{}) string
 }
