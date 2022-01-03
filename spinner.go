@@ -340,13 +340,13 @@ func New(cfg Config) (*Spinner, error) {
 
 	// if cfg.TerminalMode is still equal to AutomaticMode, this is a TTY
 	if cfg.TerminalMode == AutomaticMode {
-		cfg.TerminalMode = ForceTTYMode
-
 		if os.Getenv("TERM") == "dumb" {
-			cfg.TerminalMode |= ForceDumbTerminalMode
+			cfg.TerminalMode = ForceDumbTerminalMode
 		} else {
-			cfg.TerminalMode |= ForceSmartTerminalMode
+			cfg.TerminalMode = ForceSmartTerminalMode
 		}
+
+		cfg.TerminalMode |= ForceTTYMode
 	}
 
 	buf := bytes.NewBuffer(make([]byte, 2048))
