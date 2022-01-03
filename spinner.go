@@ -723,6 +723,21 @@ func (s *Spinner) painter(cancel, dataUpdate, pause <-chan struct{}, done chan<-
 	}
 }
 
+type paintOp struct {
+	writer          io.Writer
+	maxWidth        int
+	char            character
+	prefix          string
+	message         string
+	suffix          string
+	suffixAutoColon bool
+	colorAll        bool
+	spinnerAtEnd    bool
+	finalPaint      bool
+	notTTY          bool
+	colorFn         func(format string, a ...interface{}) string
+}
+
 func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 	s.mu.Lock()
 
@@ -766,7 +781,22 @@ func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 			}
 		}
 
-		if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, false, termModeForceNoTTY(s.termMode), cFn); err != nil {
+		op := paintOp{
+			writer:          s.buffer,
+			maxWidth:        mw,
+			char:            c,
+			prefix:          p,
+			message:         m,
+			suffix:          suf,
+			suffixAutoColon: s.suffixAutoColon,
+			colorAll:        s.colorAll,
+			spinnerAtEnd:    s.spinnerAtEnd,
+			finalPaint:      false,
+			notTTY:          termModeForceNoTTY(s.termMode),
+			colorFn:         cFn,
+		}
+
+		if _, err := paint(op); err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
 	} else {
@@ -774,7 +804,22 @@ func (s *Spinner) paintUpdate(timer *time.Timer, animate bool) {
 			panic(fmt.Sprintf("failed to erase line: %v", err))
 		}
 
-		n, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, false, termModeForceNoTTY(s.termMode), fmt.Sprintf)
+		op := paintOp{
+			writer:          s.buffer,
+			maxWidth:        mw,
+			char:            c,
+			prefix:          p,
+			message:         m,
+			suffix:          suf,
+			suffixAutoColon: s.suffixAutoColon,
+			colorAll:        false,
+			spinnerAtEnd:    s.spinnerAtEnd,
+			finalPaint:      false,
+			notTTY:          termModeForceNoTTY(s.termMode),
+			colorFn:         fmt.Sprintf,
+		}
+
+		n, err := paint(op)
 		if err != nil {
 			panic(fmt.Sprintf("failed to paint line: %v", err))
 		}
@@ -830,8 +875,22 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 
 		if c.Size > 0 || len(m) > 0 {
-			// paint the line with a newline as it's the final line
-			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, s.colorAll, s.spinnerAtEnd, true, termModeForceNoTTY(s.termMode), cFn); err != nil {
+			op := paintOp{
+				writer:          s.buffer,
+				maxWidth:        mw,
+				char:            c,
+				prefix:          p,
+				message:         m,
+				suffix:          suf,
+				suffixAutoColon: s.suffixAutoColon,
+				colorAll:        s.colorAll,
+				spinnerAtEnd:    s.spinnerAtEnd,
+				finalPaint:      true,
+				notTTY:          termModeForceNoTTY(s.termMode),
+				colorFn:         cFn,
+			}
+
+			if _, err := paint(op); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -841,7 +900,22 @@ func (s *Spinner) paintStop(chanOk bool) {
 		}
 
 		if c.Size > 0 || len(m) > 0 {
-			if _, err := paint(s.buffer, mw, c, p, m, suf, s.suffixAutoColon, false, s.spinnerAtEnd, true, termModeForceNoTTY(s.termMode), fmt.Sprintf); err != nil {
+			op := paintOp{
+				writer:          s.buffer,
+				maxWidth:        mw,
+				char:            c,
+				prefix:          p,
+				message:         m,
+				suffix:          suf,
+				suffixAutoColon: s.suffixAutoColon,
+				colorAll:        false,
+				spinnerAtEnd:    s.spinnerAtEnd,
+				finalPaint:      true,
+				notTTY:          termModeForceNoTTY(s.termMode),
+				colorFn:         fmt.Sprintf,
+			}
+
+			if _, err := paint(op); err != nil {
 				panic(fmt.Sprintf("failed to paint line: %v", err))
 			}
 		}
@@ -895,50 +969,50 @@ func padChar(char character, maxWidth int) string {
 
 // paint writes a single line to the w, using the provided character, message,
 // and color function
-func paint(w io.Writer, maxWidth int, char character, prefix, message, suffix string, suffixAutoColon, colorAll, spinnerAtEnd, finalPaint, notTTY bool, colorFn func(format string, a ...interface{}) string) (int, error) {
+func paint(op paintOp) (int, error) {
 	var output string
 
-	switch char.Size {
+	switch op.char.Size {
 	case 0:
-		if colorAll {
-			output = colorFn(message)
+		if op.colorAll {
+			output = op.colorFn(op.message)
 			break
 		}
 
-		output = message
+		output = op.message
 
 	default:
-		c := padChar(char, maxWidth)
+		c := padChar(op.char, op.maxWidth)
 
-		if spinnerAtEnd {
-			if colorAll {
-				output = colorFn("%s%s%s%s", message, prefix, c, suffix)
+		if op.spinnerAtEnd {
+			if op.colorAll {
+				output = op.colorFn("%s%s%s%s", op.message, op.prefix, c, op.suffix)
 				break
 			}
 
-			output = fmt.Sprintf("%s%s%s%s", message, prefix, colorFn(c), suffix)
+			output = fmt.Sprintf("%s%s%s%s", op.message, op.prefix, op.colorFn(c), op.suffix)
 			break
 		}
 
-		if suffixAutoColon { // also implicitly !spinnerAtEnd
-			if len(strings.TrimSpace(suffix)) > 0 && len(message) > 0 && message != "\n" {
-				suffix += ": "
+		if op.suffixAutoColon { // also implicitly !spinnerAtEnd
+			if len(strings.TrimSpace(op.suffix)) > 0 && len(op.message) > 0 && op.message != "\n" {
+				op.suffix += ": "
 			}
 		}
 
-		if colorAll {
-			output = colorFn("%s%s%s%s", prefix, c, suffix, message)
+		if op.colorAll {
+			output = op.colorFn("%s%s%s%s", op.prefix, c, op.suffix, op.message)
 			break
 		}
 
-		output = fmt.Sprintf("%s%s%s%s", prefix, colorFn(c), suffix, message)
+		output = fmt.Sprintf("%s%s%s%s", op.prefix, op.colorFn(c), op.suffix, op.message)
 	}
 
-	if finalPaint || notTTY {
+	if op.finalPaint || op.notTTY {
 		output += "\n"
 	}
 
-	return fmt.Fprint(w, output)
+	return fmt.Fprint(op.writer, output)
 }
 
 // Frequency updates the frequency of the spinner being animated.
